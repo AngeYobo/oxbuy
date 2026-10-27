@@ -20,6 +20,9 @@
  *   - whether the payTo, network, and asset of the live 402 can be pinned to
  *     the authorized values before signing (buy_curl takes none of them);
  *     the PaymentAdapter.pay contract requires it
+ *   - whether buy_curl reuses the quoted 402 or fetches a new one, and
+ *     request headers: buy forwards them, PurchaseRequest does not bind them
+ *     (docs/ISOLATION.md §7)
  *   - which buy errors guarantee nothing was signed (PaymentRefusedError);
  *     until known, every pay error must be treated as an unknown outcome
  *   - how the buy process authenticates its MCP client

@@ -1,10 +1,28 @@
-# Phase 1R evidence environment
-date_utc: 2026-10-27T16:56:58Z
+# Phase 2A / 2A-R evidence environment
+date_utc: 2026-10-27T19:21:42Z
 node: v24.21.0
 npm: 11.19.0
 os: Linux 6.8.0-1064-azure
-git_head: 33579f2ba687fb7e601fc68e2ea5686910451478
-working_tree: uncommitted Phase 1R remediation on top of git_head (see docs/CONFORMANCE.md)
+distro: Ubuntu 24.04.5 LTS
+git_branch: feat/phase-2a-process-isolation
+git_head: dcfb5ddd9e8d268f4896eaf4e81d13abe5456a53
+working_tree: uncommitted Phase 2A + 2A-R implementation on top of git_head (see docs/CONFORMANCE.md)
+
+## OS identities used by the isolation tests
+operator (gateway, executor): uid=1000(codespace) gid=1000(codespace) groups=1000(codespace),986(pipx),987(python),988(oryx),989(golang),990(docker),991(sdkman),992(ruby),993(php),994(conda),995(nvm),996(hugo),1001(ssh)
+agent: uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)
+agent no_new_privs: NoNewPrivs: 1
+operator sudo: (root) NOPASSWD: ALL
+identity switch: sudo -n setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs --reset-env (no user created, no system configuration changed)
+tmpdir default ACL (hex): 0200000001000700ffffffff04000500ffffffff20000600ffffffff
+checkout writable by agent: yes
+operator home traversable by agent: no
+
+## Trust anchor for dependencies (operator npm cache, sha512 re-verified at seal)
+approved artifact used for demo-isolated-output.json: 1ce258780b075976e7bd536cec36f6d24a5714d7c05eb80ace7f3cd044315392
+@oxdeai/core@2.0.2 https://registry.npmjs.org/@oxdeai/core/-/core-2.0.2.tgz sha512-Q569TNq/S8tG32FvPfCPTRVYFwGMNH5GjBlHMVuyoaaqYwrSvkJ9yhI503HBZ7wi/BjXYevijosqTVugmEZ2jA==
+@oxdeai/guard@2.0.3 https://registry.npmjs.org/@oxdeai/guard/-/guard-2.0.3.tgz sha512-bzp7GA6VyA6PTt/BA9HRuTsZc8Nx9mlWeQiARcoqv8SDtXSQMkZMWY9SBAEDV3b+ofar+4LyLGRHmwKGv6bTuw==
+artifact files: 276
 
 ## npm ls
 oxdeai-celo-poc@0.1.0 /workspaces/oxdeai-celo-poc
@@ -14,8 +32,3 @@ oxdeai-celo-poc@0.1.0 /workspaces/oxdeai-celo-poc
 ├─┬ @types/node@24.10.1
 │ └── undici-types@7.16.0
 └── typescript@5.9.3
-
-
-## integrity
-node_modules/@oxdeai/core 2.0.2 sha512-Q569TNq/S8tG32FvPfCPTRVYFwGMNH5GjBlHMVuyoaaqYwrSvkJ9yhI503HBZ7wi/BjXYevijosqTVugmEZ2jA==
-node_modules/@oxdeai/guard 2.0.3 sha512-bzp7GA6VyA6PTt/BA9HRuTsZc8Nx9mlWeQiARcoqv8SDtXSQMkZMWY9SBAEDV3b+ofar+4LyLGRHmwKGv6bTuw==

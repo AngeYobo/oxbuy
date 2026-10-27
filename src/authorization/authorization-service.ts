@@ -10,7 +10,7 @@
  * state with a missing or empty required allowlist, an engine error, or a
  * state CAS conflict all return DENY and issue no authorization.
  */
-import { createPublicKey, generateKeyPairSync, randomBytes } from "node:crypto";
+import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes } from "node:crypto";
 import {
   PolicyEngine,
   RECOMMENDED_TRUSTED_TIME_PROFILE,
@@ -41,14 +41,20 @@ export type AuthorizationServiceOptions = {
   readonly stateStore: PolicyStateStore;
   /** Trusted clock, unix seconds. */
   readonly now: () => number;
+  /**
+   * Operator-provisioned Ed25519 signing key. Omitted: an ephemeral key is
+   * generated (in-process harness).
+   */
+  readonly signingKey?: { readonly privateKeyPem: string; readonly kid: string };
 };
 
 export function createAuthorizationService(options: AuthorizationServiceOptions) {
-  // Ephemeral per-process key. This is an authorization-signing key, not a
-  // wallet: it cannot move funds.
-  const { privateKey } = generateKeyPairSync("ed25519");
+  // An authorization-signing key, not a wallet: it cannot move funds.
+  const privateKey = options.signingKey
+    ? createPrivateKey(options.signingKey.privateKeyPem)
+    : generateKeyPairSync("ed25519").privateKey;
   const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
-  const kid = `pdp-${randomBytes(4).toString("hex")}`;
+  const kid = options.signingKey?.kid ?? `pdp-${randomBytes(4).toString("hex")}`;
 
   const engine = new PolicyEngine({
     policy_version: options.policyVersion,

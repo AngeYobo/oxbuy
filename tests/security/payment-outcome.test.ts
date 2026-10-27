@@ -6,6 +6,7 @@ import { INTERNAL_EXECUTOR_TOKEN_HEADER } from "@oxdeai/guard";
 import { createMockBuyAdapter } from "../../src/adapters/mock-buy/mock-buy.ts";
 import type { PaymentAdapter, PaymentReceipt } from "../../src/executor/payment-adapter.ts";
 import { createPaymentExecutor } from "../../src/executor/executor.ts";
+import { createInMemoryPaymentJournal } from "../../src/executor/payment-journal.ts";
 import { createLocalSystem, type LocalSystemFaults } from "../../src/system.ts";
 import { authorize, requestFor, SERVICES } from "../helpers.ts";
 
@@ -150,15 +151,21 @@ test("R-F2g no automatic retry: pay invoked once; resubmission after INDETERMINA
 test("R-F2h executor never hands the same intent to pay twice, even with a valid token", async () => {
   const mock = createMockBuyAdapter(Object.values(SERVICES));
   const token = "e".repeat(64);
-  const executor = createPaymentExecutor({ internalToken: token, adapter: mock.adapter as PaymentAdapter });
   const sys = createLocalSystem();
+  const { keySet, authority, audience } = sys.harness.authService.trustMaterial;
+  const executor = createPaymentExecutor({
+    internalToken: token,
+    adapter: mock.adapter as PaymentAdapter,
+    verification: { expectedAudience: audience, trustedKeySets: [keySet], trustedAuthorizationAuthorities: [authority], now: sys.harness.clock.now },
+    journal: createInMemoryPaymentJournal(),
+  });
   const auth = await authorize(sys, requestFor(SERVICES.weather));
-  const action = { request: auth.request, intent_ref: auth.intent_ref };
+  const body = { action: { request: auth.request, intent_ref: auth.intent_ref }, authorization: auth.authorization };
   const headers = { [INTERNAL_EXECUTOR_TOKEN_HEADER]: token };
-  const first = await executor.handle(action, headers);
-  const second = await executor.handle(action, headers);
+  const first = await executor.handle(body, headers);
+  const second = await executor.handle(body, headers);
   assert.equal(first.executed, true);
   assert.equal(second.executed, false);
-  assert.deepEqual(second.body, { outcome: "NOT_EXECUTED", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT" });
+  assert.deepEqual(second.body, { outcome: "NOT_EXECUTED", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", prior_state: "SETTLED" });
   assert.equal(mock.inspect.counters.payments, 1);
 });

@@ -1,14 +1,36 @@
-# Architecture: OxDeAI x402 Gateway, Phase 1
+# Architecture: OxDeAI x402 Gateway, Phase 1 / 1R / 2A
 
 Phase 1 is a local, single-process prototype. It uses the published OxDeAI
 packages unmodified and a deterministic mock of the `@celo/buy` quote/pay
 flow. There is no wallet, no network access, and no chain interaction.
 
+Phase 2A runs the same components as three processes (agent, gateway,
+executor) with the agent under a separate OS identity, a durable payment
+journal, and executor-side verification of the signed authorization. Phase
+2A-R makes trusted code launch only from a sealed, operator-approved
+artifact verified before import (`src/isolation/artifact.ts`,
+`src/isolation/trusted-entry.ts`). The process layout, IPC, access control,
+trust store, journal, and recovery procedure are in `docs/ISOLATION.md`.
+
+The agent is isolated from the trusted side; the trusted components are not
+isolated from each other:
+- The gateway and executor share one OS identity, which has passwordless
+  sudo in this Codespace.
+- The gateway holds the PDP authorization signing key.
+- The gateway can read the mock wallet and call the payment adapter
+  directly.
+
+The executor's own signature check therefore does not constrain a
+compromised gateway. No protection against a compromised gateway is
+claimed. The single-process composition (`src/system.ts`)
+remains the harness for the protocol tests; the executor, gateway, and PDP
+code are the same in both.
+
 Packages used (exact versions, from `package-lock.json`):
 
 | Package | Version | Used for |
 | --- | --- | --- |
-| `@oxdeai/core` | 2.0.2 | `PolicyEngine` (PDP), `AuthorizationV1` issuance, `intentHash`, `sha256HexFromJson`, `verifyAuthorization` (tests), `signAuthorizationEd25519` (forgery tests only) |
+| `@oxdeai/core` | 2.0.2 | `PolicyEngine` (PDP), `AuthorizationV1` issuance, `intentHash`, `sha256HexFromJson`, `verifyAuthorization` (executor, tests), `signAuthorizationEd25519` (forgery tests only) |
 | `@oxdeai/guard` | 2.0.3 | `createPepGatewayExecutor` (PEP), `protectUpstreamExecution` (executor token check), `createInMemoryReplayStore` |
 
 No OxDeAI protocol semantics are changed. The only integrator-supplied pieces
@@ -58,7 +80,10 @@ are the ones the published gateway leaves open: the action-to-intent mapping
 | Agent | `src/agent/` | nothing sensitive | n/a |
 | Authorization service (PDP) | `src/authorization/authorization-service.ts` | Ed25519 authorization private key, policy state | `authorize` function only |
 | Gateway (PEP) | `src/gateway/gateway.ts` | public KeySet, `(issuer, policy_id)` authority, executor token, replay store | `purchase` function only (via client) |
-| Executor | `src/executor/executor.ts` | executor token, `PaymentAdapter`, payment journal | no |
+| Executor | `src/executor/executor.ts` | executor token, PDP trust anchor (public KeySet + authority), `PaymentAdapter`, payment journal | no |
+| Payment journal | `src/executor/payment-journal.ts` | in-memory (harness) or durable file journal (executor process) | no |
+| Isolated deployment | `src/isolation/` | launcher, process entry points, IPC, journal CLI (`docs/ISOLATION.md`) | public socket path only |
+| Trust store / artifacts | `src/isolation/artifact.ts`, `trusted-entry.ts`, `trust-cli.ts` | sealed, approved artifact; pre-import and pre-launch verification | no (store is operator-only) |
 | Mock buy | `src/adapters/mock-buy/mock-buy.ts` | mock catalog, payment ledger | no (quote is wrapped) |
 | `@celo/buy` adapter | `src/adapters/celo-buy/celo-buy.ts` | interface only; throws `NOT_IMPLEMENTED` | no |
 | Composition root | `src/system.ts` | creates the executor token; wires everything | returns `client` |
@@ -81,12 +106,17 @@ are the ones the published gateway leaves open: the action-to-intent mapping
    2. `authorization.intent_hash === hashGatewayAction(action)`;
    3. atomic `consumeAuthId(auth_id)`; a second use is `AUTH_REPLAY`;
    4. executor call with the internal executor token header.
-4. The executor accepts only with the token (`protectUpstreamExecution`),
+4. The gateway sends `{ action, authorization }` (the guard's PEP is built
+   per request so the detached authorization can be forwarded). The
+   executor accepts only with the token (`protectUpstreamExecution`), then
+   verifies the authorization itself (`verifyAuthorization` strict against
+   its own trust anchor; `intent_hash` recomputed from the action),
    re-validates the request, re-quotes, and refuses unless the live 402
    requirements match the authorized `network`, `asset`, `recipient`, and
    resource, and the live price is `<= max_amount`.
-5. The executor records `STARTED` in its payment journal (keyed by
-   `intent_hash`; a second attempt for the same intent is refused), then
+5. The executor atomically consumes `auth_id` and records `STARTED` in its
+   payment journal (keyed by `intent_hash`; a second attempt for the same
+   intent or auth_id is refused), then
    calls `pay` with the full authorized binding (`AuthorizedPayment`:
    `intent_hash` plus the exact request, including `recipient`, `network`,
    `asset`, `max_amount`). The adapter contract requires `pay` to re-check
@@ -169,7 +199,8 @@ commits no state.
 | --- | --- | --- |
 | Agent ↔ signing key | key generated inside the PDP closure; only the public KeySet leaves | Holds against an agent that uses only `client`. Not isolation against code in the same process. |
 | Agent ↔ executor / adapter | agent receives a frozen object with `quote`, `authorize`, `purchase` only | Same as above. |
-| Gateway ↔ executor | random 32-byte token in a header, checked by `protectUpstreamExecution` | Tested: missing, forged, and duplicated headers are rejected. |
+| Gateway ↔ executor | random 32-byte token in a header, checked by `protectUpstreamExecution`, plus executor-side verification of the signed authorization | Tested: missing, forged, and duplicated headers are rejected; a valid token with a missing, forged, expired, future, foreign, or mismatched authorization is refused (P2A-13). |
+| Agent ↔ executor, keys, wallet, journal (Phase 2A) | separate OS identity for the agent; Unix sockets and files protected by permissions | Tested with kernel errnos from the agent identity (P2A-02, -11, -12). Gateway and executor share one identity. See `docs/ISOLATION.md`. |
 | Authorization artifact | Ed25519 signature, audience, expiry, authority pair | Tested: tamper, forged key, wrong audience, expiry. |
 | Request ↔ authorization | `intent_hash` recomputed from the presented request | Tested for every bound field. |
 | Hashed object ↔ executed object | JSON round-trip + deep freeze before verification | Tested with caller mutation after submit. |
@@ -180,20 +211,27 @@ commits no state.
 
 These are stated as limits of Phase 1, not as solved properties.
 
-1. **Single process.** All components run in one Node.js process. Closures
-   prevent the agent from being *handed* the executor, but any code running
-   in the same process can import `createMockBuyAdapter` or the executor.
-   Non-bypassability at the OS or process level is **not demonstrated**.
-   With real `@celo/buy`, the boundary must be a separate process and OS user
-   for the executor and the buy MCP server / keychain wallet (see
-   `docs/FEASIBILITY.md`).
+1. **Single process (Phase 1 harness).** In `src/system.ts` all components
+   run in one Node.js process; closures are not isolation. Phase 2A adds the
+   process-isolated deployment (`docs/ISOLATION.md`): the agent runs as a
+   different OS identity and is denied the executor socket, wallet key,
+   ledger, journal, configs, and trusted code by the kernel (P2A-02, -11,
+   -12). Its changes to the working tree cannot reach a later launch
+   (SI-01..07). Gateway and executor still share one OS identity, which has
+   sudo, and the gateway holds the signing key and can reach the mock wallet
+   (`docs/ISOLATION.md` §4, A1-A2). With real `@celo/buy`, the buy process
+   and keychain must run under the executor's identity (NOT_TESTED).
 2. **Agent is not authenticated.** `agent_id` is fixed by deployment
    configuration, not established from an authenticated caller.
    `createSecureGuard` / `TrustedExecutionContext` are not used: they apply to
    the inline guard path, while this design uses the gateway path where the
    authorization is issued separately and presented by the caller.
-3. **Replay store is in-memory.** Replay protection holds for one gateway
-   instance lifetime. It is lost on restart and not shared across instances.
+3. **Gateway replay store is in-memory.** It is lost on gateway restart and
+   not shared across instances. Since Phase 2A the executor also consumes
+   `auth_id` durably, so a resubmission after a gateway restart is refused
+   by the executor and not paid (P2A-08). The PDP's policy state (budget)
+   is also in-memory and resets on gateway restart: new intents are
+   authorized against a fresh budget (reproduced: 2× the budget spent).
 4. **Authorization is spent before payment.** `auth_id` is consumed before
    the executor runs. If the executor then refuses (price or payee changed),
    the authorization is spent and the budget reserved at authorization time
@@ -211,8 +249,9 @@ These are stated as limits of Phase 1, not as solved properties.
    binding at payment time is not provided for buy, and the receipt check
    only detects a wrong payee after funds have moved.
 7. **Executor token.** A static shared secret compared with `===` inside the
-   published `@oxdeai/guard` helper. Adequate in-process; Phase 2 should use a
-   transport the agent cannot reach (Unix socket permissions or mTLS).
+   published `@oxdeai/guard` helper. In Phase 2A it travels only over the
+   executor's private Unix socket, which the agent identity cannot open, and
+   it is not sufficient on its own (limitation 15).
 8. **Trusted clock is injected.** Tests use a fixed start time
    (`1800000000`). A deployment needs a trusted clock source.
 9. **Quote endpoint is unauthenticated** and read-only.
@@ -227,10 +266,16 @@ These are stated as limits of Phase 1, not as solved properties.
     refusals on `PaymentRefusedError` being thrown only when nothing was
     signed. Which `@celo/buy` errors guarantee "not signed" is not verified;
     until it is, a buy adapter should map every `pay` error to unknown.
-14. **Payment journal is in-memory.** It is lost on restart and not shared.
-    The duplicate-intent refusal and INDETERMINATE reconciliation hold for
-    one executor lifetime only. Reconciliation itself is manual.
-15. **Executor token is the executor's only credential.** The executor does
-    not see or re-verify the authorization; anyone holding the token can
-    request any payment. This is acceptable only while the token stays
-    inside the trusted process (see limitation 1).
+14. **Payment journal.** The executor process uses the durable file journal
+    (`docs/ISOLATION.md` §5): survives executor restarts and crashes
+    (P2A-08, P2A-09), single writer, never auto-resolves STARTED. The
+    in-process harness uses an in-memory journal with the same interface.
+    Durability is bounded by the local disk; reconciliation is a manual
+    operator step (`docs/ISOLATION.md` §6).
+15. **Executor token is no longer the executor's only credential.** Since
+    Phase 2A the executor verifies the signed authorization and its
+    `intent_hash` binding itself (P2A-13). This stops a token holder
+    without a valid authorization. It does not stop a compromised gateway:
+    the gateway holds the PDP signing key, so it can produce valid
+    authorizations, and it shares the executor's OS identity, so it can
+    read the wallet directly (`docs/ISOLATION.md` A1).

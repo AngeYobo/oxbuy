@@ -17,7 +17,13 @@
  *   - a JSON round-trip + deep freeze of the input, so the object that is
  *     hashed is the object that is executed, and the caller cannot mutate it
  *     while the gateway awaits the replay store;
- *   - an outcome boundary on the guard's result (`classify`).
+ *   - an outcome boundary on the guard's result (`classify`);
+ *   - forwarding the signed authorization with the action, so the executor
+ *     can verify it independently. The guard's `executeUpstream` receives
+ *     only the action, so the guard executor is built per request with the
+ *     already-detached authorization captured in its closure. Its options
+ *     (trust material, replay store, clock, timeout) are the same on every
+ *     request.
  *
  * Outcome boundary: the guard reports every upstream error or timeout as
  * `decision: "DENY", executed: false`, even after the executor may have
@@ -31,14 +37,18 @@
 import { createPepGatewayExecutor, type PepGatewayResult, type ReplayStore } from "@oxdeai/guard";
 import type { AuthorizationAuthority, KeySet } from "@oxdeai/core";
 import { hashGatewayAction } from "../authorization/intent.ts";
-import type { PaymentExecutor } from "../executor/executor.ts";
+
+/** Gateway -> executor transport (in process, or IPC). */
+export type ExecutorTransport = {
+  handle(body: unknown, headers: Record<string, string>): Promise<{ status: number; body: unknown }>;
+};
 
 export type GatewayOptions = {
   readonly expectedAudience: string;
   readonly trustedKeySets: readonly KeySet[];
   readonly trustedAuthorizationAuthorities: readonly AuthorizationAuthority[];
   readonly internalToken: string;
-  readonly executor: Pick<PaymentExecutor, "handle">;
+  readonly executor: ExecutorTransport;
   readonly replayStore: ReplayStore;
   /** Trusted clock, unix seconds. */
   readonly now: () => number;
@@ -120,20 +130,22 @@ function classify(r: PepGatewayResult, detached: unknown): GatewayResult {
 }
 
 export function createPaymentGateway(options: GatewayOptions) {
-  const pep = createPepGatewayExecutor({
-    expectedAudience: options.expectedAudience,
-    trustedKeySets: options.trustedKeySets,
-    trustedAuthorizationAuthorities: options.trustedAuthorizationAuthorities,
-    internalExecutorToken: options.internalToken,
-    replayStore: options.replayStore,
-    now: options.now,
-    timeoutMs: options.timeoutMs,
-    hashAction: hashGatewayAction,
-    executeUpstream: async (action, headers) => {
-      const res = await options.executor.handle(action, headers);
-      return { status: res.status, body: res.body };
-    },
-  });
+  function pepFor(authorization: unknown) {
+    return createPepGatewayExecutor({
+      expectedAudience: options.expectedAudience,
+      trustedKeySets: options.trustedKeySets,
+      trustedAuthorizationAuthorities: options.trustedAuthorizationAuthorities,
+      internalExecutorToken: options.internalToken,
+      replayStore: options.replayStore,
+      now: options.now,
+      timeoutMs: options.timeoutMs,
+      hashAction: hashGatewayAction,
+      executeUpstream: async (action, headers) => {
+        const res = await options.executor.handle({ action, authorization }, headers);
+        return { status: res.status, body: res.body };
+      },
+    });
+  }
 
   return {
     async submit(input: unknown): Promise<GatewayResult> {
@@ -147,7 +159,8 @@ export function createPaymentGateway(options: GatewayOptions) {
           body: { ok: false, decision: "DENY", executed: false, reason: "INVALID_REQUEST" },
         };
       }
-      return classify(await pep(detached), detached);
+      const authorization = typeof detached === "object" && detached !== null ? (detached as { authorization?: unknown }).authorization : undefined;
+      return classify(await pepFor(authorization)(detached), detached);
     },
   };
 }

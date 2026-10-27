@@ -1,4 +1,4 @@
-# Demo: Phase 1 (local, mock only)
+# Demo: Phase 1 and Phase 2A (local, mock only)
 
 Everything here runs offline against a mock payment adapter. No wallet is
 created or imported, no network request is made, and nothing touches Celo.
@@ -14,8 +14,9 @@ created or imported, no network request is made, and nothing touches Celo.
 ```sh
 npm ci                 # install exact versions from package-lock.json
 npm run typecheck      # tsc --noEmit
-npm test               # 82 tests
-npm run demo           # scenario table
+npm test               # 119 tests (includes the Phase 2A / 2A-R isolation suites)
+npm run demo           # scenario table (single process)
+npm run demo:isolated  # Phase 2A: agent, gateway, executor as separate processes
 ```
 
 Regenerate the evidence files:
@@ -23,6 +24,7 @@ Regenerate the evidence files:
 ```sh
 npm run test:evidence                          # evidence/test-results.txt, .tap
 node src/demo.ts --json > evidence/demo-output.json
+npm run --silent demo:isolated > evidence/demo-isolated-output.json   # needs an approved artifact
 ```
 
 `auth_id`, signatures, intent ids, and mock settlement references are random
@@ -53,6 +55,31 @@ Other reasons come from the gateway or executor.
 The script exits non-zero if any scenario's decision differs from the
 expected one.
 
+## Phase 2A isolated demo
+
+`npm run demo:isolated` launches only an operator-approved artifact from the
+trust store (`$OXDEAI_TRUST_STORE`, default `~/.oxdeai-celo-poc/trust`),
+verified before import. If none is approved, it prints
+`{"status":"BLOCKED"}` and exits 2. Seal and approve once (see
+`docs/ISOLATION.md` §3a):
+
+```sh
+node src/isolation/trust-cli.ts seal "$PWD"     # prints the digest and the changes vs the approved artifact
+node src/isolation/trust-cli.ts approve <digest> "reviewed"
+```
+
+It then starts the executor and the gateway as the current user, from that
+artifact. It then runs `src/isolation/agent-main.ts`
+as the `nobody` account through `sudo setpriv --no-new-privs`. This needs
+passwordless sudo; without it the demo prints `{"status":"BLOCKED"}` and
+exits 2 rather than running everything as one user. The agent:
+- buys the weather service: ALLOW, 1 ledger payment, journal SETTLED;
+- tries the unlisted service: PDP DENY `ALLOWLIST_TARGET`;
+- tries to connect to the executor socket and to read the mock wallet key:
+  both `EACCES`.
+
+Pids, `auth_id` and `intent_hash` differ per run. See `docs/ISOLATION.md`.
+
 ## Mock configuration
 
 Defined in `src/system.ts`:
@@ -74,7 +101,9 @@ Defined in `src/system.ts`:
 | `evidence/test-results.txt` | spec reporter output of the full suite |
 | `evidence/test-results.tap` | TAP output of the same run |
 | `evidence/demo-output.json` | `node src/demo.ts --json` |
-| `evidence/environment.txt` | Node/npm versions, git HEAD, `npm ls`, OxDeAI package integrity hashes |
+| `evidence/demo-isolated-output.json` | `npm run --silent demo:isolated` (Phase 2A) |
+| `evidence/environment.txt` | Node/npm versions, git HEAD, OS identities used, `npm ls`, OxDeAI package integrity hashes |
 
 See `docs/CONFORMANCE.md` for the requirement-to-test mapping and
-`docs/ARCHITECTURE.md` for trust boundaries and limitations.
+`docs/ARCHITECTURE.md` and `docs/ISOLATION.md` for trust boundaries and
+limitations.

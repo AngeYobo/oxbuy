@@ -13,8 +13,9 @@
  *
  * In-process limitation: all components share one Node.js process. Closures
  * keep the agent from *being handed* the executor, but they are not an
- * isolation boundary against code that runs in the same process. See
- * docs/ARCHITECTURE.md.
+ * isolation boundary against code that runs in the same process. This
+ * composition is the test harness for protocol logic; the process-isolated
+ * deployment is src/isolation/launcher.ts. See docs/ARCHITECTURE.md.
  */
 import { randomBytes } from "node:crypto";
 import { createInMemoryReplayStore, type ReplayStore } from "@oxdeai/guard";
@@ -25,6 +26,7 @@ import { createAuthorizationService } from "./authorization/authorization-servic
 import { paymentTarget, validatePurchaseRequest } from "./authorization/intent.ts";
 import { createInMemoryPolicyStateStore } from "./authorization/policy-state.ts";
 import { createPaymentExecutor, type PaymentExecutor } from "./executor/executor.ts";
+import { createInMemoryPaymentJournal } from "./executor/payment-journal.ts";
 import type { PaymentAdapter } from "./executor/payment-adapter.ts";
 import { createPaymentGateway } from "./gateway/gateway.ts";
 
@@ -155,7 +157,18 @@ export function createLocalSystem(opts: { startTime?: number; initialState?: Sta
   const internalToken = randomBytes(32).toString("hex");
   const faults = opts.faults ?? {};
   const adapter = faults.wrapAdapter ? faults.wrapAdapter(mockBuy.adapter, mockBuy.inspect) : mockBuy.adapter;
-  const executor = createPaymentExecutor({ internalToken, adapter });
+  const executor = createPaymentExecutor({
+    internalToken,
+    adapter,
+    verification: {
+      expectedAudience: GATEWAY_AUDIENCE,
+      trustedKeySets: [authService.trustMaterial.keySet],
+      trustedAuthorizationAuthorities: [authService.trustMaterial.authority],
+      now: clock.now,
+    },
+    // In-process harness only; the executor process uses the durable journal.
+    journal: createInMemoryPaymentJournal(clock.now),
+  });
   const replayStore = createSwitchableReplayStore();
   const gateway = createPaymentGateway({
     expectedAudience: GATEWAY_AUDIENCE,
