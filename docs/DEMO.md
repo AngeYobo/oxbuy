@@ -14,7 +14,7 @@ created or imported, no network request is made, and nothing touches Celo.
 ```sh
 npm ci                 # install exact versions from package-lock.json
 npm run typecheck      # tsc --noEmit
-npm test               # 43 tests
+npm test               # 82 tests
 npm run demo           # scenario table
 ```
 

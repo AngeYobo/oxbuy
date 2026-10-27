@@ -40,11 +40,14 @@ are the ones the published gateway leaves open: the action-to-intent mapping
                                                                                │ protectUpstreamExecution     │
                                                                                │ re-quote; check payee,       │
                                                                                │ network, asset, resource,    │
-                                                                               │ price <= max_amount          │
+                                                                               │ price <= max_amount;         │
+                                                                               │ journal STARTED; after pay:  │
+                                                                               │ verify receipt vs binding    │
                                                                                └──────────────┬───────────────┘
-                                                                                              v
+                                                                                              v AuthorizedPayment
                                                                                ┌──────────────────────────────┐
                                                                                │ PaymentAdapter.pay           │
+                                                                               │ re-check binding, then sign  │
                                                                                │ Phase 1: src/adapters/mock-buy│
                                                                                │ Phase 2: @celo/buy (stub)    │
                                                                                └──────────────────────────────┘
@@ -55,7 +58,7 @@ are the ones the published gateway leaves open: the action-to-intent mapping
 | Agent | `src/agent/` | nothing sensitive | n/a |
 | Authorization service (PDP) | `src/authorization/authorization-service.ts` | Ed25519 authorization private key, policy state | `authorize` function only |
 | Gateway (PEP) | `src/gateway/gateway.ts` | public KeySet, `(issuer, policy_id)` authority, executor token, replay store | `purchase` function only (via client) |
-| Executor | `src/executor/executor.ts` | executor token, `PaymentAdapter` | no |
+| Executor | `src/executor/executor.ts` | executor token, `PaymentAdapter`, payment journal | no |
 | Mock buy | `src/adapters/mock-buy/mock-buy.ts` | mock catalog, payment ledger | no (quote is wrapped) |
 | `@celo/buy` adapter | `src/adapters/celo-buy/celo-buy.ts` | interface only; throws `NOT_IMPLEMENTED` | no |
 | Composition root | `src/system.ts` | creates the executor token; wires everything | returns `client` |
@@ -81,9 +84,42 @@ are the ones the published gateway leaves open: the action-to-intent mapping
 4. The executor accepts only with the token (`protectUpstreamExecution`),
    re-validates the request, re-quotes, and refuses unless the live 402
    requirements match the authorized `network`, `asset`, `recipient`, and
-   resource, and the live price is `<= max_amount`. Then it calls `pay`.
+   resource, and the live price is `<= max_amount`.
+5. The executor records `STARTED` in its payment journal (keyed by
+   `intent_hash`; a second attempt for the same intent is refused), then
+   calls `pay` with the full authorized binding (`AuthorizedPayment`:
+   `intent_hash` plus the exact request, including `recipient`, `network`,
+   `asset`, `max_amount`). The adapter contract requires `pay` to re-check
+   these against the live requirements immediately before signing and to
+   throw `PaymentRefusedError` on any mismatch. The mock does this.
+6. After `pay` returns, the executor checks the receipt: `settled === true`,
+   well-formed, and `pay_to`, `network`, `asset`, `amount <= max_amount`
+   within the binding. This **detects** a bad settlement after the fact;
+   it cannot prevent or undo it.
 
-Any failure at any step returns DENY and `pay` is not called.
+Failures in steps 1-4 return DENY and `pay` is not called. Once `pay` has
+been invoked, the result is one of the outcomes below; it is never DENY
+unless the adapter attests that nothing was signed.
+
+## Payment outcomes
+
+| Decision | `executed` | Meaning | Produced when |
+| --- | --- | --- | --- |
+| `DENY` | `false` | Nothing was signed or submitted. | Guard verification fails (upstream not called); executor pre-payment check fails; `pay` throws `PaymentRefusedError`. |
+| `ALLOW` | `true` | Settled receipt verified against the binding. | Executor outcome `EXECUTED`. |
+| `INDETERMINATE` | `"unknown"` | A payment may have occurred; final outcome not known. Reason `PAYMENT_UNKNOWN`. Not retried. | Any other error from `pay`, ambiguous or out-of-binding receipt, gateway→executor connection loss, gateway timeout, executor internal error. |
+
+The published `createPepGatewayExecutor` reports every upstream error and
+timeout as `decision: "DENY", executed: false` (`@oxdeai/guard@2.0.3`,
+`dist/gateway.js` L131-178) and has no third outcome. `src/gateway/gateway.ts`
+therefore adds an application-level outcome boundary (`classify`) on the
+guard's *result*. It does not alter or skip any guard step: when the
+upstream was not called, the guard's DENY is returned unchanged. When the
+upstream was called, DENY is only returned if the executor positively
+attests `NOT_EXECUTED`; anything else is `INDETERMINATE`. A gateway timeout
+is `INDETERMINATE` even if the executor had not reached `pay` yet
+(conservative); the executor journal resolves it. INDETERMINATE results
+carry `auth_id` and `intent_hash` for reconciliation against the journal.
 
 ## Authorization binding
 
@@ -115,7 +151,17 @@ of one request.
 Policy (in `src/system.ts`, evaluated by the published `PolicyEngine`
 modules): allowlisted `action_types`, `assets`, and complete `target`
 tuples; per-action cap; per-period budget; velocity; nonce replay; recursion
-depth; concurrency; tool call limits.
+depth; concurrency; tool call limits. The `target` excludes the URL query,
+so any query on an allowed path is authorizable (it is still bound into
+`metadata_hash`).
+
+`@oxdeai/core`'s `AllowlistModule` treats an empty or absent allowlist as
+"allow all". Without changing that, the PDP refuses to evaluate policy
+state unless `allowlists.action_types`, `assets`, and `targets` are each a
+non-empty array of non-empty strings (`assertRequiredAllowlists`,
+`src/authorization/policy-state.ts`). Otherwise it returns
+`POLICY_STATE_INVALID:*` before evaluation, issues no authorization, and
+commits no state.
 
 ## Trust boundaries
 
@@ -127,6 +173,8 @@ depth; concurrency; tool call limits.
 | Authorization artifact | Ed25519 signature, audience, expiry, authority pair | Tested: tamper, forged key, wrong audience, expiry. |
 | Request ↔ authorization | `intent_hash` recomputed from the presented request | Tested for every bound field. |
 | Hashed object ↔ executed object | JSON round-trip + deep freeze before verification | Tested with caller mutation after submit. |
+| Authorized binding ↔ payment | `pay` receives `AuthorizedPayment` and must re-check payee, network, asset, price before signing | Mock only. Tested: each changed between quote and pay is refused before signing. Not verified for `@celo/buy`. |
+| Payment ↔ reported outcome | executor journal + receipt check + gateway outcome boundary | Mock only. Tested: post-settlement error, lost connection, timeout, ambiguous and out-of-binding receipts are INDETERMINATE. |
 
 ## Known limitations
 
@@ -152,9 +200,16 @@ These are stated as limits of Phase 1, not as solved properties.
    is not released. This fails closed but is not a refund mechanism.
 5. **Budget is reserved at authorization, not at settlement.** An
    authorization that expires unused still counts against the budget.
-6. **Executor quote-then-pay window.** The executor re-quotes and then calls
-   `pay`. The mock re-checks price inside `pay`; whether real `buy curl
-   --max-amount` / `buy_curl` enforces the cap before signing is not verified.
+6. **Payment-time binding depends on the adapter.** The executor's quote
+   check alone does not bind the payment: the live 402 can change between
+   quote and pay (payee, network, asset, or price). The adapter contract
+   requires `pay` to re-check all of them before signing, and the mock
+   does. Per `docs/FEASIBILITY.md`, `buy_curl` accepts `url`, `method`,
+   `headers`, `body`, and `maxAmount`, but no recipient, network, or
+   asset. Whether a `@celo/buy`-backed adapter can refuse a different
+   `payTo` before signing is **not verified**. If it cannot, recipient
+   binding at payment time is not provided for buy, and the receipt check
+   only detects a wrong payee after funds have moved.
 7. **Executor token.** A static shared secret compared with `===` inside the
    published `@oxdeai/guard` helper. Adequate in-process; Phase 2 should use a
    transport the agent cannot reach (Unix socket permissions or mTLS).
@@ -167,3 +222,15 @@ These are stated as limits of Phase 1, not as solved properties.
     `0x2222…` addresses are placeholders, not Celo network, token, or
     account identifiers.
 12. **ERC-8021 attribution** is not implemented or tested. No claim is made.
+13. **Outcome attestation is trusted.** DENY after the executor was called
+    relies on the executor's `NOT_EXECUTED` attestation, and for adapter
+    refusals on `PaymentRefusedError` being thrown only when nothing was
+    signed. Which `@celo/buy` errors guarantee "not signed" is not verified;
+    until it is, a buy adapter should map every `pay` error to unknown.
+14. **Payment journal is in-memory.** It is lost on restart and not shared.
+    The duplicate-intent refusal and INDETERMINATE reconciliation hold for
+    one executor lifetime only. Reconciliation itself is manual.
+15. **Executor token is the executor's only credential.** The executor does
+    not see or re-verify the authorization; anyone holding the token can
+    request any payment. This is acceptable only while the token stays
+    inside the trusted process (see limitation 1).

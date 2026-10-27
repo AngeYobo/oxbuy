@@ -20,11 +20,12 @@ import { randomBytes } from "node:crypto";
 import { createInMemoryReplayStore, type ReplayStore } from "@oxdeai/guard";
 import type { State } from "@oxdeai/core";
 import type { AgentGatewayClient, PurchaseResult } from "./agent/agent.ts";
-import { createMockBuyAdapter, type MockService } from "./adapters/mock-buy/mock-buy.ts";
+import { createMockBuyAdapter, type MockBuy, type MockService } from "./adapters/mock-buy/mock-buy.ts";
 import { createAuthorizationService } from "./authorization/authorization-service.ts";
 import { paymentTarget, validatePurchaseRequest } from "./authorization/intent.ts";
 import { createInMemoryPolicyStateStore } from "./authorization/policy-state.ts";
-import { createPaymentExecutor } from "./executor/executor.ts";
+import { createPaymentExecutor, type PaymentExecutor } from "./executor/executor.ts";
+import type { PaymentAdapter } from "./executor/payment-adapter.ts";
 import { createPaymentGateway } from "./gateway/gateway.ts";
 
 export const AGENT_ID = "agent-celo-poc-1";
@@ -33,6 +34,8 @@ export const PDP_ISSUER = "oxdeai-celo-poc.pdp";
 export const POLICY_VERSION = "x402-poc-v1";
 /** Fixed start time so runs are reproducible. Unix seconds. */
 export const DEFAULT_START_TIME = 1_800_000_000;
+/** Gateway -> executor timeout. Expiry is reported INDETERMINATE. */
+export const GATEWAY_TIMEOUT_MS = 30_000;
 
 // Mock identifiers. Not real networks, tokens, or addresses.
 export const MOCK_NETWORK = "mock-celo";
@@ -119,7 +122,16 @@ function createSwitchableReplayStore() {
   return store;
 }
 
-export function createLocalSystem(opts: { startTime?: number; initialState?: State | null } = {}) {
+/** Fault injection for tests. Every hook sits on the trusted side. */
+export type LocalSystemFaults = {
+  /** Wrap the executor's payment adapter (e.g. fail after settlement). */
+  readonly wrapAdapter?: (inner: PaymentAdapter, mock: MockBuy["inspect"]) => PaymentAdapter;
+  /** Wrap the gateway -> executor transport (e.g. lose the response). */
+  readonly wrapExecutorHandle?: (inner: PaymentExecutor["handle"]) => PaymentExecutor["handle"];
+  readonly gatewayTimeoutMs?: number;
+};
+
+export function createLocalSystem(opts: { startTime?: number; initialState?: State | null; faults?: LocalSystemFaults } = {}) {
   let now = opts.startTime ?? DEFAULT_START_TIME;
   const clock = {
     now: () => now,
@@ -141,16 +153,19 @@ export function createLocalSystem(opts: { startTime?: number; initialState?: Sta
 
   const mockBuy = createMockBuyAdapter(Object.values(SERVICES));
   const internalToken = randomBytes(32).toString("hex");
-  const executor = createPaymentExecutor({ internalToken, adapter: mockBuy.adapter });
+  const faults = opts.faults ?? {};
+  const adapter = faults.wrapAdapter ? faults.wrapAdapter(mockBuy.adapter, mockBuy.inspect) : mockBuy.adapter;
+  const executor = createPaymentExecutor({ internalToken, adapter });
   const replayStore = createSwitchableReplayStore();
   const gateway = createPaymentGateway({
     expectedAudience: GATEWAY_AUDIENCE,
     trustedKeySets: [authService.trustMaterial.keySet],
     trustedAuthorizationAuthorities: [authService.trustMaterial.authority],
     internalToken,
-    executor,
+    executor: { handle: faults.wrapExecutorHandle ? faults.wrapExecutorHandle(executor.handle) : executor.handle },
     replayStore,
     now: clock.now,
+    timeoutMs: faults.gatewayTimeoutMs ?? GATEWAY_TIMEOUT_MS,
   });
 
   const client: AgentGatewayClient = {
@@ -166,8 +181,10 @@ export function createLocalSystem(opts: { startTime?: number; initialState?: Sta
         executed: r.body.executed,
         status: r.status,
         reason: r.body.reason,
-        detail: (r.body.upstream_error as { error?: string } | undefined)?.error,
-        receipt: r.body.upstream_result,
+        detail: r.body.detail,
+        receipt: r.body.receipt,
+        auth_id: r.body.auth_id,
+        intent_hash: r.body.intent_hash,
       };
     },
   };

@@ -6,7 +6,8 @@
  * docs/FEASIBILITY.md): a read-only quote (`buy_pay_quote`) and a paid call
  * that signs and settles (`buy_curl` / `buy curl --max-amount`). Field names
  * here are this PoC's own; they are NOT a verified mirror of the @celo/buy
- * wire format.
+ * wire format, and nothing here is evidence that @celo/buy can honour the
+ * payment-time checks required of `pay` below.
  */
 import type { PurchaseRequest } from "../agent/purchase-request.ts";
 
@@ -24,6 +25,8 @@ export type PaymentReceipt = {
   readonly settled: boolean;
   /** Settlement reference. Mock adapters MUST prefix it with "mock-". */
   readonly reference: string;
+  readonly network: string;
+  readonly asset: string;
   readonly amount: string;
   readonly pay_to: string;
   readonly response_status: number;
@@ -32,12 +35,41 @@ export type PaymentReceipt = {
 
 export type QuoteRequest = Pick<PurchaseRequest, "service_id" | "method" | "url" | "body">;
 
+/**
+ * The full authorized payment binding handed to `pay`.
+ *
+ * `request` carries the exact method, URL, body, service id, and the
+ * authorized network, asset, recipient, and max_amount. `intent_hash` is the
+ * OxDeAI intent hash the gateway verified the authorization against: the
+ * exact request identity.
+ */
+export type AuthorizedPayment = {
+  readonly intent_hash: string;
+  readonly request: PurchaseRequest;
+};
+
+/**
+ * Thrown by `pay` ONLY when it is certain that nothing was signed or
+ * submitted. Any other error from `pay` is treated as an unknown payment
+ * outcome.
+ */
+export class PaymentRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PaymentRefusedError";
+  }
+}
+
 export interface PaymentAdapter {
   /** Read-only. Must not sign or pay. */
   quote(request: QuoteRequest): Promise<PaymentQuote>;
   /**
-   * Sign and settle for exactly `request`, refusing if the live price exceeds
-   * `maxAmount`. This is the only operation that can move funds.
+   * Sign and settle for exactly `payment.request`. This is the only
+   * operation that can move funds.
+   *
+   * Immediately before signing, against the live 402 requirements, it must
+   * throw `PaymentRefusedError` unless network, asset, payTo, and resource
+   * equal the authorized values and the price is <= `max_amount`.
    */
-  pay(request: PurchaseRequest, maxAmount: bigint): Promise<PaymentReceipt>;
+  pay(payment: AuthorizedPayment): Promise<PaymentReceipt>;
 }

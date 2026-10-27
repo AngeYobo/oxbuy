@@ -8,14 +8,20 @@
  */
 import { createHash } from "node:crypto";
 import type { PurchaseRequest } from "../../agent/purchase-request.ts";
-import type { PaymentAdapter, PaymentQuote, PaymentReceipt, QuoteRequest } from "../../executor/payment-adapter.ts";
+import {
+  PaymentRefusedError,
+  type PaymentAdapter,
+  type PaymentQuote,
+  type PaymentReceipt,
+  type QuoteRequest,
+} from "../../executor/payment-adapter.ts";
 
 export type MockService = {
   readonly service_id: string;
   /** Origin + path, no query. */
   readonly resource: string;
-  readonly network: string;
-  readonly asset: string;
+  network: string;
+  asset: string;
   pay_to: string;
   /** Atomic units. */
   price: bigint;
@@ -48,11 +54,19 @@ export function createMockBuyAdapter(services: readonly MockService[]) {
       counters.quotes += 1;
       return toQuote(lookup(request));
     },
-    async pay(request, maxAmount) {
-      const service = lookup(request);
-      // Mirrors `buy curl --max-amount`: refuse before signing when the live
-      // price exceeds the cap.
-      if (service.price > maxAmount) throw new Error("MOCK_BUY_PRICE_EXCEEDS_MAX_AMOUNT");
+    async pay({ request }) {
+      let service: MockService;
+      try {
+        service = lookup(request);
+      } catch (err) {
+        throw new PaymentRefusedError((err as Error).message);
+      }
+      // Re-check the live requirements against the authorized binding at the
+      // point of payment, not only at the preceding quote.
+      if (service.network !== request.network) throw new PaymentRefusedError("MOCK_BUY_NETWORK_MISMATCH");
+      if (service.asset !== request.asset) throw new PaymentRefusedError("MOCK_BUY_ASSET_MISMATCH");
+      if (service.pay_to.toLowerCase() !== request.recipient) throw new PaymentRefusedError("MOCK_BUY_RECIPIENT_MISMATCH");
+      if (service.price > BigInt(request.max_amount)) throw new PaymentRefusedError("MOCK_BUY_PRICE_EXCEEDS_MAX_AMOUNT");
       counters.signatures += 1;
       const digest = createHash("sha256")
         .update(JSON.stringify([request, service.price.toString(), counters.signatures]))
@@ -60,6 +74,8 @@ export function createMockBuyAdapter(services: readonly MockService[]) {
       const receipt: PaymentReceipt = {
         settled: true,
         reference: `mock-${digest.slice(0, 32)}`,
+        network: service.network,
+        asset: service.asset,
         amount: service.price.toString(),
         pay_to: service.pay_to,
         response_status: 200,
@@ -88,6 +104,18 @@ export function createMockBuyAdapter(services: readonly MockService[]) {
         const s = catalog.get(serviceId);
         if (!s) throw new Error("unknown service");
         s.pay_to = payTo;
+      },
+      /** Simulate the upstream 402 challenge naming a different network. */
+      setNetwork(serviceId: string, network: string) {
+        const s = catalog.get(serviceId);
+        if (!s) throw new Error("unknown service");
+        s.network = network;
+      },
+      /** Simulate the upstream 402 challenge naming a different asset. */
+      setAsset(serviceId: string, asset: string) {
+        const s = catalog.get(serviceId);
+        if (!s) throw new Error("unknown service");
+        s.asset = asset;
       },
     },
   };

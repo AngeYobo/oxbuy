@@ -6,8 +6,9 @@
  * authorization signing key; neither the agent nor the gateway ever sees it.
  * The gateway receives only the public KeySet (see `trustMaterial`).
  *
- * Fail-closed: invalid request, unavailable/missing policy state, an engine
- * error, or a state CAS conflict all return DENY and issue no authorization.
+ * Fail-closed: invalid request, unavailable/missing policy state, policy
+ * state with a missing or empty required allowlist, an engine error, or a
+ * state CAS conflict all return DENY and issue no authorization.
  */
 import { createPublicKey, generateKeyPairSync, randomBytes } from "node:crypto";
 import {
@@ -20,7 +21,7 @@ import {
 } from "@oxdeai/core";
 import type { IntentRef, PurchaseRequest } from "../agent/purchase-request.ts";
 import { buildPaymentIntent, validatePurchaseRequest } from "./intent.ts";
-import type { PolicyStateStore } from "./policy-state.ts";
+import { assertRequiredAllowlists, type PolicyStateStore } from "./policy-state.ts";
 
 export type AuthorizationDecision =
   | { readonly decision: "ALLOW"; readonly authorization: AuthorizationV1; readonly intent_ref: IntentRef }
@@ -88,6 +89,11 @@ export function createAuthorizationService(options: AuthorizationServiceOptions)
       loaded = await options.stateStore.load();
     } catch (err) {
       return { decision: "DENY", reasons: [`POLICY_STATE_UNAVAILABLE:${(err as Error).message}`] };
+    }
+    try {
+      assertRequiredAllowlists(loaded.state);
+    } catch (err) {
+      return { decision: "DENY", reasons: [`POLICY_STATE_INVALID:${(err as Error).message}`] };
     }
 
     const evaluationTime = options.now();

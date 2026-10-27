@@ -10,7 +10,7 @@ import type { AuthorizationV1 } from "@oxdeai/core";
 import type { IntentRef, PurchaseRequest } from "./agent/purchase-request.ts";
 import { createLocalSystem, POLICY, SERVICES } from "./system.ts";
 
-type Row = { scenario: string; expected: "ALLOW" | "DENY"; decision: string; executed: boolean; reason: string; payments: number };
+type Row = { scenario: string; expected: "ALLOW" | "DENY"; decision: string; executed: boolean | "unknown"; reason: string; payments: number };
 
 function request(service: (typeof SERVICES)[keyof typeof SERVICES], overrides: Partial<PurchaseRequest> = {}): PurchaseRequest {
   return {
@@ -29,7 +29,7 @@ function request(service: (typeof SERVICES)[keyof typeof SERVICES], overrides: P
 async function scenario(
   name: string,
   expected: Row["expected"],
-  run: (sys: ReturnType<typeof createLocalSystem>) => Promise<{ decision: string; executed?: boolean; reason?: string }>,
+  run: (sys: ReturnType<typeof createLocalSystem>) => Promise<{ decision: string; executed?: boolean | "unknown"; reason?: string }>,
 ): Promise<Row> {
   const sys = createLocalSystem();
   const out = await run(sys);
@@ -46,7 +46,7 @@ async function scenario(
 async function authorizeThen(
   sys: ReturnType<typeof createLocalSystem>,
   req: PurchaseRequest,
-  then: (auth: { request: PurchaseRequest; intent_ref: IntentRef; authorization: AuthorizationV1 }) => Promise<{ decision: string; executed?: boolean; reason?: string }>,
+  then: (auth: { request: PurchaseRequest; intent_ref: IntentRef; authorization: AuthorizationV1 }) => Promise<{ decision: string; executed?: boolean | "unknown"; reason?: string }>,
 ) {
   const a = await sys.client.authorize(req);
   if (a.decision !== "ALLOW") return { decision: "DENY", reason: `PDP:${a.reasons.join(",")}` };

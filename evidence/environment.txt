@@ -1,9 +1,10 @@
-# Phase 1 evidence environment
-date_utc: 2026-10-27T15:33:21Z
+# Phase 1R evidence environment
+date_utc: 2026-10-27T16:56:58Z
 node: v24.21.0
 npm: 11.19.0
 os: Linux 6.8.0-1064-azure
-git_head: f9d969d24fe16cb26a98b04f79eb655e5e1592f3
+git_head: 33579f2ba687fb7e601fc68e2ea5686910451478
+working_tree: uncommitted Phase 1R remediation on top of git_head (see docs/CONFORMANCE.md)
 
 ## npm ls
 oxdeai-celo-poc@0.1.0 /workspaces/oxdeai-celo-poc

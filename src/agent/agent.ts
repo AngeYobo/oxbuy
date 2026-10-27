@@ -18,14 +18,21 @@ export type AuthorizeResult =
   | { readonly decision: "ALLOW"; readonly authorization: AuthorizationV1; readonly intent_ref: IntentRef }
   | { readonly decision: "DENY"; readonly reasons: readonly string[] };
 
+/**
+ * DENY: nothing was signed. ALLOW: verified settled payment.
+ * INDETERMINATE: a payment may have occurred; `executed` is "unknown". Do not
+ * retry; the operator reconciles it by `intent_hash`.
+ */
 export type PurchaseResult = {
-  readonly decision: "ALLOW" | "DENY";
-  readonly executed: boolean;
+  readonly decision: "ALLOW" | "DENY" | "INDETERMINATE";
+  readonly executed: boolean | "unknown";
   readonly status: number;
   readonly reason?: string;
-  /** Executor refusal reason when reason is UPSTREAM_ERROR. */
+  /** Executor reason when reason is UPSTREAM_ERROR or PAYMENT_UNKNOWN. */
   readonly detail?: string;
   readonly receipt?: unknown;
+  readonly auth_id?: string;
+  readonly intent_hash?: string;
 };
 
 export interface AgentGatewayClient {
