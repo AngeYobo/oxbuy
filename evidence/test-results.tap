@@ -1,0 +1,796 @@
+TAP version 13
+# Subtest: R-F3 empty targets (no allowed services): PDP DENY for weather-api, no authorization, no state change
+ok 1 - R-F3 empty targets (no allowed services): PDP DENY for weather-api, no authorization, no state change
+  ---
+  duration_ms: 8.220507
+  type: 'test'
+  ...
+# Subtest: R-F3 empty targets (no allowed services): PDP DENY for unlisted-api, no authorization, no state change
+ok 2 - R-F3 empty targets (no allowed services): PDP DENY for unlisted-api, no authorization, no state change
+  ---
+  duration_ms: 1.354779
+  type: 'test'
+  ...
+# Subtest: R-F3 empty assets: PDP DENY for weather-api, no authorization, no state change
+ok 3 - R-F3 empty assets: PDP DENY for weather-api, no authorization, no state change
+  ---
+  duration_ms: 1.520134
+  type: 'test'
+  ...
+# Subtest: R-F3 empty assets: PDP DENY for unlisted-api, no authorization, no state change
+ok 4 - R-F3 empty assets: PDP DENY for unlisted-api, no authorization, no state change
+  ---
+  duration_ms: 0.991812
+  type: 'test'
+  ...
+# Subtest: R-F3 empty action_types: PDP DENY for weather-api, no authorization, no state change
+ok 5 - R-F3 empty action_types: PDP DENY for weather-api, no authorization, no state change
+  ---
+  duration_ms: 1.687805
+  type: 'test'
+  ...
+# Subtest: R-F3 empty action_types: PDP DENY for unlisted-api, no authorization, no state change
+ok 6 - R-F3 empty action_types: PDP DENY for unlisted-api, no authorization, no state change
+  ---
+  duration_ms: 1.232027
+  type: 'test'
+  ...
+# Subtest: R-F3 targets absent: PDP DENY for weather-api, no authorization, no state change
+ok 7 - R-F3 targets absent: PDP DENY for weather-api, no authorization, no state change
+  ---
+  duration_ms: 1.846959
+  type: 'test'
+  ...
+# Subtest: R-F3 targets absent: PDP DENY for unlisted-api, no authorization, no state change
+ok 8 - R-F3 targets absent: PDP DENY for unlisted-api, no authorization, no state change
+  ---
+  duration_ms: 1.091631
+  type: 'test'
+  ...
+# Subtest: R-F3 assets absent: PDP DENY for weather-api, no authorization, no state change
+ok 9 - R-F3 assets absent: PDP DENY for weather-api, no authorization, no state change
+  ---
+  duration_ms: 1.690969
+  type: 'test'
+  ...
+# Subtest: R-F3 assets absent: PDP DENY for unlisted-api, no authorization, no state change
+ok 10 - R-F3 assets absent: PDP DENY for unlisted-api, no authorization, no state change
+  ---
+  duration_ms: 1.770789
+  type: 'test'
+  ...
+# Subtest: R-F3 action_types absent: PDP DENY for weather-api, no authorization, no state change
+ok 11 - R-F3 action_types absent: PDP DENY for weather-api, no authorization, no state change
+  ---
+  duration_ms: 2.036456
+  type: 'test'
+  ...
+# Subtest: R-F3 action_types absent: PDP DENY for unlisted-api, no authorization, no state change
+ok 12 - R-F3 action_types absent: PDP DENY for unlisted-api, no authorization, no state change
+  ---
+  duration_ms: 0.788861
+  type: 'test'
+  ...
+# Subtest: R-F3 targets not an array: PDP DENY for weather-api, no authorization, no state change
+ok 13 - R-F3 targets not an array: PDP DENY for weather-api, no authorization, no state change
+  ---
+  duration_ms: 0.80211
+  type: 'test'
+  ...
+# Subtest: R-F3 targets not an array: PDP DENY for unlisted-api, no authorization, no state change
+ok 14 - R-F3 targets not an array: PDP DENY for unlisted-api, no authorization, no state change
+  ---
+  duration_ms: 0.932688
+  type: 'test'
+  ...
+# Subtest: R-F3 targets with empty string: PDP DENY for weather-api, no authorization, no state change
+ok 15 - R-F3 targets with empty string: PDP DENY for weather-api, no authorization, no state change
+  ---
+  duration_ms: 0.744275
+  type: 'test'
+  ...
+# Subtest: R-F3 targets with empty string: PDP DENY for unlisted-api, no authorization, no state change
+ok 16 - R-F3 targets with empty string: PDP DENY for unlisted-api, no authorization, no state change
+  ---
+  duration_ms: 1.205436
+  type: 'test'
+  ...
+# Subtest: R-F3 assets with non-string entry: PDP DENY for weather-api, no authorization, no state change
+ok 17 - R-F3 assets with non-string entry: PDP DENY for weather-api, no authorization, no state change
+  ---
+  duration_ms: 0.722799
+  type: 'test'
+  ...
+# Subtest: R-F3 assets with non-string entry: PDP DENY for unlisted-api, no authorization, no state change
+ok 18 - R-F3 assets with non-string entry: PDP DENY for unlisted-api, no authorization, no state change
+  ---
+  duration_ms: 0.643721
+  type: 'test'
+  ...
+# Subtest: R-F3 allowlists object absent: PDP DENY
+ok 19 - R-F3 allowlists object absent: PDP DENY
+  ---
+  duration_ms: 0.999834
+  type: 'test'
+  ...
+# Subtest: T2a unauthorized service: PDP DENY (ALLOWLIST_TARGET), no payment
+ok 20 - T2a unauthorized service: PDP DENY (ALLOWLIST_TARGET), no payment
+  ---
+  duration_ms: 14.538314
+  type: 'test'
+  ...
+# Subtest: T2b allowed service with substituted recipient: PDP DENY, no payment
+ok 21 - T2b allowed service with substituted recipient: PDP DENY, no payment
+  ---
+  duration_ms: 2.360858
+  type: 'test'
+  ...
+# Subtest: T2c unauthorized asset: PDP DENY (ALLOWLIST_ASSET), no payment
+ok 22 - T2c unauthorized asset: PDP DENY (ALLOWLIST_ASSET), no payment
+  ---
+  duration_ms: 3.045687
+  type: 'test'
+  ...
+# Subtest: T2d upstream 402 names a different payee after authorization: executor refuses, no payment
+ok 23 - T2d upstream 402 names a different payee after authorization: executor refuses, no payment
+  ---
+  duration_ms: 11.375321
+  type: 'test'
+  ...
+# Subtest: T3a amount above per-action policy cap: PDP DENY, no payment
+ok 24 - T3a amount above per-action policy cap: PDP DENY, no payment
+  ---
+  duration_ms: 1.688667
+  type: 'test'
+  ...
+# Subtest: T3b cumulative budget exhausted: PDP DENY after budget is spent
+ok 25 - T3b cumulative budget exhausted: PDP DENY after budget is spent
+  ---
+  duration_ms: 13.705444
+  type: 'test'
+  ...
+# Subtest: T3c live price rises above authorized max_amount: executor refuses before signing
+ok 26 - T3c live price rises above authorized max_amount: executor refuses before signing
+  ---
+  duration_ms: 3.501483
+  type: 'test'
+  ...
+# Subtest: T8a missing policy state: PDP DENY, no authorization issued
+ok 27 - T8a missing policy state: PDP DENY, no authorization issued
+  ---
+  duration_ms: 0.778399
+  type: 'test'
+  ...
+# Subtest: T8b unavailable policy state backend: PDP DENY
+ok 28 - T8b unavailable policy state backend: PDP DENY
+  ---
+  duration_ms: 0.966174
+  type: 'test'
+  ...
+# Subtest: T8c structurally invalid policy state: engine DENY (STATE_INVALID)
+ok 29 - T8c structurally invalid policy state: engine DENY (STATE_INVALID)
+  ---
+  duration_ms: 1.388901
+  type: 'test'
+  ...
+# Subtest: T8d replay store unavailable at the gateway: DENY, no payment
+ok 30 - T8d replay store unavailable at the gateway: DENY, no payment
+  ---
+  duration_ms: 3.473215
+  type: 'test'
+  ...
+# Subtest: J1 records survive close and reopen; a reserved intent is never reserved again
+ok 31 - J1 records survive close and reopen; a reserved intent is never reserved again
+  ---
+  duration_ms: 33.543912
+  type: 'test'
+  ...
+# Subtest: J2 an auth_id is consumed durably: reusing it for another intent is AUTH_REPLAY, also after reopen
+ok 32 - J2 an auth_id is consumed durably: reusing it for another intent is AUTH_REPLAY, also after reopen
+  ---
+  duration_ms: 12.044761
+  type: 'test'
+  ...
+# Subtest: J3 single writer: a second open fails while the first holds the lock; a dead holder's lock is recovered
+ok 33 - J3 single writer: a second open fails while the first holds the lock; a dead holder's lock is recovered
+  ---
+  duration_ms: 41.051009
+  type: 'test'
+  ...
+# Subtest: J4 crash recovery: STARTED stays STARTED and is listed for reconciliation; never auto-converted
+ok 34 - J4 crash recovery: STARTED stays STARTED and is listed for reconciliation; never auto-converted
+  ---
+  duration_ms: 44.171536
+  type: 'test'
+  ...
+# Subtest: J5 only STARTED can move to a final state, once
+ok 35 - J5 only STARTED can move to a final state, once
+  ---
+  duration_ms: 9.480601
+  type: 'test'
+  ...
+# Subtest: J6 storage permissions: directories 0700 and files 0600 despite the parent's default ACL
+ok 36 - J6 storage permissions: directories 0700 and files 0600 despite the parent's default ACL
+  ---
+  duration_ms: 8.959076
+  type: 'test'
+  ...
+# Subtest: J7 an unreadable record is reported UNKNOWN, never as absent
+ok 37 - J7 an unreadable record is reported UNKNOWN, never as absent
+  ---
+  duration_ms: 7.50278
+  type: 'test'
+  ...
+# Subtest: J8 operator resolution: only for STARTED/UNKNOWN, once, and the state is kept
+ok 38 - J8 operator resolution: only for STARTED/UNKNOWN, once, and the state is kept
+  ---
+  duration_ms: 14.305474
+  type: 'test'
+  ...
+# Subtest: J9a journal unwritable at reservation: NOT_EXECUTED before pay, no payment
+ok 39 - J9a journal unwritable at reservation: NOT_EXECUTED before pay, no payment
+  ---
+  duration_ms: 18.577212
+  type: 'test'
+  ...
+# Subtest: J9b journal unwritable after settlement: PAYMENT_UNKNOWN, journal still STARTED
+ok 40 - J9b journal unwritable after settlement: PAYMENT_UNKNOWN, journal still STARTED
+  ---
+  duration_ms: 12.208288
+  type: 'test'
+  ...
+# Subtest: T1 valid authorized request: ALLOW and exactly one mock payment
+ok 41 - T1 valid authorized request: ALLOW and exactly one mock payment
+  ---
+  duration_ms: 23.616859
+  type: 'test'
+  ...
+# Subtest: T1b agent flow quote -> authorize -> purchase executes once
+ok 42 - T1b agent flow quote -> authorize -> purchase executes once
+  ---
+  duration_ms: 5.037633
+  type: 'test'
+  ...
+# Subtest: R3-F1a initialization is explicit and happens once; re-init cannot overwrite
+ok 43 - R3-F1a initialization is explicit and happens once; re-init cannot overwrite
+  ---
+  duration_ms: 90.058386
+  type: 'test'
+  ...
+# Subtest: R3-F1b restart and crash with existing state preserve the budget
+ok 44 - R3-F1b restart and crash with existing state preserve the budget
+  ---
+  duration_ms: 3571.506298
+  type: 'test'
+  ...
+# Subtest: R3-F1c restart with missing policy state: auth refuses to start, no authorization, no payment, state not recreated
+ok 45 - R3-F1c restart with missing policy state: auth refuses to start, no authorization, no payment, state not recreated
+  ---
+  duration_ms: 3085.567817
+  type: 'test'
+  ...
+# Subtest: R3-F1c restart with corrupt policy state: auth refuses to start, no authorization, no payment, state not recreated
+ok 46 - R3-F1c restart with corrupt policy state: auth refuses to start, no authorization, no payment, state not recreated
+  ---
+  duration_ms: 2944.016791
+  type: 'test'
+  ...
+# Subtest: R3-F1c restart with unreadable policy state: auth refuses to start, no authorization, no payment, state not recreated
+ok 47 - R3-F1c restart with unreadable policy state: auth refuses to start, no authorization, no payment, state not recreated
+  ---
+  duration_ms: 2920.978594
+  type: 'test'
+  ...
+# Subtest: R3-F2a a new deployment of the same policy identity keeps the exhausted budget
+ok 48 - R3-F2a a new deployment of the same policy identity keeps the exhausted budget
+  ---
+  duration_ms: 4346.659768
+  type: 'test'
+  ...
+# Subtest: R3-F2b a different policy identity cannot reuse or reset the original budget
+ok 49 - R3-F2b a different policy identity cannot reuse or reset the original budget
+  ---
+  duration_ms: 3881.444271
+  type: 'test'
+  ...
+# Subtest: R3-F4a two auth processes starting at once: exactly one owns the writer lock
+ok 50 - R3-F4a two auth processes starting at once: exactly one owns the writer lock
+  ---
+  duration_ms: 2753.044721
+  type: 'test'
+  ...
+# Subtest: R3-F4b an auth process without the lock refuses, even when no other writer is running
+ok 51 - R3-F4b an auth process without the lock refuses, even when no other writer is running
+  ---
+  duration_ms: 2016.411574
+  type: 'test'
+  ...
+# Subtest: R3-F4c crash during contention: after SIGKILL, still at most one writer
+ok 52 - R3-F4c crash during contention: after SIGKILL, still at most one writer
+  ---
+  duration_ms: 1772.850921
+  type: 'test'
+  ...
+# Subtest: R3-F4d lock cannot be taken (lock file unopenable): auth refuses, no authorization, no payment
+ok 53 - R3-F4d lock cannot be taken (lock file unopenable): auth refuses, no authorization, no payment
+  ---
+  duration_ms: 2208.063018
+  type: 'test'
+  ...
+# Subtest: R3-F4e concurrent authorizations, across a restart, never exceed the budget
+ok 54 - R3-F4e concurrent authorizations, across a restart, never exceed the budget
+  ---
+  duration_ms: 8069.357676
+  type: 'test'
+  ...
+# Subtest: P2A-01 authorized mock payment from the agent process: ALLOW, exactly one payment
+ok 55 - P2A-01 authorized mock payment from the agent process: ALLOW, exactly one payment
+  ---
+  duration_ms: 2115.256926
+  type: 'test'
+  ...
+# Subtest: P2A-02 agent identity cannot connect to the executor socket (EACCES); public socket works
+ok 56 - P2A-02 agent identity cannot connect to the executor socket (EACCES); public socket works
+  ---
+  duration_ms: 413.503349
+  type: 'test'
+  ...
+# Subtest: P2A-03 forged authorizations from the agent: DENY at the gateway, no payment
+ok 57 - P2A-03 forged authorizations from the agent: DENY at the gateway, no payment
+  ---
+  duration_ms: 296.739252
+  type: 'test'
+  ...
+# Subtest: P2A-04 expired authorization: DENY at the gateway, and rejected by the executor directly
+ok 58 - P2A-04 expired authorization: DENY at the gateway, and rejected by the executor directly
+  ---
+  duration_ms: 4540.416801
+  type: 'test'
+  ...
+# Subtest: P2A-05 wrong issuer or audience, signed with the real PDP key: rejected by gateway and executor
+ok 59 - P2A-05 wrong issuer or audience, signed with the real PDP key: rejected by gateway and executor
+  ---
+  duration_ms: 1941.995105
+  type: 'test'
+  ...
+# Subtest: P2A-06 payment intent modified after authorization: INTENT_HASH_MISMATCH at gateway and executor
+ok 60 - P2A-06 payment intent modified after authorization: INTENT_HASH_MISMATCH at gateway and executor
+  ---
+  duration_ms: 672.496701
+  type: 'test'
+  ...
+# Subtest: P2A-07 replayed authorization: second submit DENY AUTH_REPLAY; executor refuses it directly too
+ok 61 - P2A-07 replayed authorization: second submit DENY AUTH_REPLAY; executor refuses it directly too
+  ---
+  duration_ms: 836.87118
+  type: 'test'
+  ...
+# Subtest: P2A-08 executor (and gateway) restart, then the same intent again: rejected from the durable journal
+ok 62 - P2A-08 executor (and gateway) restart, then the same intent again: rejected from the durable journal
+  ---
+  duration_ms: 3111.439732
+  type: 'test'
+  ...
+# Subtest: P2A-09 executor killed after the payment started (crashAfterPay): INDETERMINATE; STARTED survives restart; no retry
+ok 63 - P2A-09 executor killed after the payment started (crashAfterPay): INDETERMINATE; STARTED survives restart; no retry
+  ---
+  duration_ms: 3271.368045
+  type: 'test'
+  ...
+# Subtest: P2A-09 executor killed after the payment started (crashBeforePay): INDETERMINATE; STARTED survives restart; no retry
+ok 64 - P2A-09 executor killed after the payment started (crashBeforePay): INDETERMINATE; STARTED survives restart; no retry
+  ---
+  duration_ms: 3279.74824
+  type: 'test'
+  ...
+# Subtest: P2A-10 gateway->executor IPC timeout (delayResponseMs): INDETERMINATE 504, settles once later
+ok 65 - P2A-10 gateway->executor IPC timeout (delayResponseMs): INDETERMINATE 504, settles once later
+  ---
+  duration_ms: 4642.682094
+  type: 'test'
+  ...
+# Subtest: P2A-10 gateway->executor IPC timeout (delayPayMs): INDETERMINATE 504, settles once later
+ok 66 - P2A-10 gateway->executor IPC timeout (delayPayMs): INDETERMINATE 504, settles once later
+  ---
+  duration_ms: 4624.717765
+  type: 'test'
+  ...
+# Subtest: P2A-11 agent identity cannot read the journal, ledger, wallet key, or any config (EACCES)
+ok 67 - P2A-11 agent identity cannot read the journal, ledger, wallet key, or any config (EACCES)
+  ---
+  duration_ms: 325.180818
+  type: 'test'
+  ...
+# Subtest: P2A-12 agent imports the trusted payment runtime and pays directly: blocked by the OS
+ok 68 - P2A-12 agent imports the trusted payment runtime and pays directly: blocked by the OS
+  ---
+  duration_ms: 1130.082017
+  type: 'test'
+  ...
+# Subtest: P2A-13 token holder bypassing the gateway's checks: executor verifies the authorization itself
+ok 69 - P2A-13 token holder bypassing the gateway's checks: executor verifies the authorization itself
+  ---
+  duration_ms: 1907.181305
+  type: 'test'
+  ...
+# Subtest: P2A-14 concurrent duplicate requests: at most one payment (via gateway and directly at the executor)
+ok 70 - P2A-14 concurrent duplicate requests: at most one payment (via gateway and directly at the executor)
+  ---
+  duration_ms: 1999.429071
+  type: 'test'
+  ...
+# Subtest: P2A secrets never appear in trusted-process logs or in responses to the agent
+ok 71 - P2A secrets never appear in trusted-process logs or in responses to the agent
+  ---
+  duration_ms: 242.893819
+  type: 'test'
+  ...
+# Subtest: SI-01 a valid protected artifact launches and pays exactly once
+ok 72 - SI-01 a valid protected artifact launches and pays exactly once
+  ---
+  duration_ms: 2092.582289
+  type: 'test'
+  ...
+# Subtest: SI-02 agent modifies src/isolation/executor-main.ts before launch: never executed; a re-seal is a different, unapproved artifact
+ok 73 - SI-02 agent modifies src/isolation/executor-main.ts before launch: never executed; a re-seal is a different, unapproved artifact
+  ---
+  duration_ms: 2901.640117
+  type: 'test'
+  ...
+# Subtest: SI-02 agent modifies src/isolation/gateway-main.ts before launch: never executed; a re-seal is a different, unapproved artifact
+ok 74 - SI-02 agent modifies src/isolation/gateway-main.ts before launch: never executed; a re-seal is a different, unapproved artifact
+  ---
+  duration_ms: 2859.668131
+  type: 'test'
+  ...
+# Subtest: SI-02 agent modifies src/executor/executor.ts before launch: never executed; a re-seal is a different, unapproved artifact
+ok 75 - SI-02 agent modifies src/executor/executor.ts before launch: never executed; a re-seal is a different, unapproved artifact
+  ---
+  duration_ms: 2795.04469
+  type: 'test'
+  ...
+# Subtest: SI-02 agent modifies src/isolation/launcher.ts before launch: never executed; a re-seal is a different, unapproved artifact
+ok 76 - SI-02 agent modifies src/isolation/launcher.ts before launch: never executed; a re-seal is a different, unapproved artifact
+  ---
+  duration_ms: 2888.836195
+  type: 'test'
+  ...
+# Subtest: SI-03 agent modifies OxDeAI dependencies in node_modules: the sealed artifact is unaffected
+ok 77 - SI-03 agent modifies OxDeAI dependencies in node_modules: the sealed artifact is unaffected
+  ---
+  duration_ms: 2378.808311
+  type: 'test'
+  ...
+# Subtest: SI-04 agent edits the lockfile to point at other dependency bytes: seal fails closed
+ok 78 - SI-04 agent edits the lockfile to point at other dependency bytes: seal fails closed
+  ---
+  duration_ms: 54.479214
+  type: 'test'
+  ...
+# Subtest: SI-05 agent cannot alter the trust store, the approval, the artifact, or the runtime configuration
+ok 79 - SI-05 agent cannot alter the trust store, the approval, the artifact, or the runtime configuration
+  ---
+  duration_ms: 1946.6496
+  type: 'test'
+  ...
+# Subtest: SI-06 misdeployed store the agent can write: tampering and mere writability are both refused before launch
+ok 80 - SI-06 misdeployed store the agent can write: tampering and mere writability are both refused before launch
+  ---
+  duration_ms: 565.863143
+  type: 'test'
+  ...
+# Subtest: SI-07 launcher loaded from the working tree (not an approved artifact): refused, no fallback
+ok 81 - SI-07 launcher loaded from the working tree (not an approved artifact): refused, no fallback
+  ---
+  duration_ms: 1.639177
+  type: 'test'
+  ...
+# Subtest: T5 expired authorization: AUTH_EXPIRED, no payment
+ok 82 - T5 expired authorization: AUTH_EXPIRED, no payment
+  ---
+  duration_ms: 18.042564
+  type: 'test'
+  ...
+# Subtest: T5 authorization at exact expiry second: DENY (exclusive bound)
+ok 83 - T5 authorization at exact expiry second: DENY (exclusive bound)
+  ---
+  duration_ms: 4.748274
+  type: 'test'
+  ...
+# Subtest: T6 replayed authorization: second use AUTH_REPLAY, exactly one payment
+ok 84 - T6 replayed authorization: second use AUTH_REPLAY, exactly one payment
+  ---
+  duration_ms: 11.28854
+  type: 'test'
+  ...
+# Subtest: T6 concurrent replay: exactly one of two simultaneous submissions executes
+ok 85 - T6 concurrent replay: exactly one of two simultaneous submissions executes
+  ---
+  duration_ms: 5.104393
+  type: 'test'
+  ...
+# Subtest: T7a corrupted signature bytes: AUTH_SIGNATURE_INVALID, no payment
+ok 86 - T7a corrupted signature bytes: AUTH_SIGNATURE_INVALID, no payment
+  ---
+  duration_ms: 3.577652
+  type: 'test'
+  ...
+# Subtest: T7b signed field changed without re-signing (expiry extended): AUTH_SIGNATURE_INVALID
+ok 87 - T7b signed field changed without re-signing (expiry extended): AUTH_SIGNATURE_INVALID
+  ---
+  duration_ms: 2.741474
+  type: 'test'
+  ...
+# Subtest: T7c authorization signed by an untrusted key claiming the trusted issuer and kid: DENY
+ok 88 - T7c authorization signed by an untrusted key claiming the trusted issuer and kid: DENY
+  ---
+  duration_ms: 3.098502
+  type: 'test'
+  ...
+# Subtest: T7d self-issued authorization for an arbitrary request (attacker key, own hash): DENY
+ok 89 - T7d self-issued authorization for an arbitrary request (attacker key, own hash): DENY
+  ---
+  duration_ms: 4.747338
+  type: 'test'
+  ...
+# Subtest: T7e wrong audience (field rewritten): DENY
+ok 90 - T7e wrong audience (field rewritten): DENY
+  ---
+  duration_ms: 3.533188
+  type: 'test'
+  ...
+# Subtest: missing authorization: INVALID_REQUEST, no payment
+ok 91 - missing authorization: INVALID_REQUEST, no payment
+  ---
+  duration_ms: 2.304948
+  type: 'test'
+  ...
+# Subtest: T9a agent client exposes no executor, adapter, token, or signing material
+ok 92 - T9a agent client exposes no executor, adapter, token, or signing material
+  ---
+  duration_ms: 7.271057
+  type: 'test'
+  ...
+# Subtest: T9b direct executor call without internal token: 403, no payment
+ok 93 - T9b direct executor call without internal token: 403, no payment
+  ---
+  duration_ms: 10.94576
+  type: 'test'
+  ...
+# Subtest: T9c direct executor call with forged token: 403, no payment
+ok 94 - T9c direct executor call with forged token: 403, no payment
+  ---
+  duration_ms: 8.554756
+  type: 'test'
+  ...
+# Subtest: T9d direct executor call with a token header given twice: 403
+ok 95 - T9d direct executor call with a token header given twice: 403
+  ---
+  duration_ms: 8.625538
+  type: 'test'
+  ...
+# Subtest: T9e authorization from one system instance is rejected by another (different trust root)
+ok 96 - T9e authorization from one system instance is rejected by another (different trust root)
+  ---
+  duration_ms: 20.867509
+  type: 'test'
+  ...
+# Subtest: T10 across every DENY path, the mock buy adapter never signs or pays
+ok 97 - T10 across every DENY path, the mock buy adapter never signs or pays
+  ---
+  duration_ms: 22.187158
+  type: 'test'
+  ...
+# Subtest: R-F1a recipient changes between executor quote and pay: refused before signing, DENY, no payment
+ok 98 - R-F1a recipient changes between executor quote and pay: refused before signing, DENY, no payment
+  ---
+  duration_ms: 22.889486
+  type: 'test'
+  ...
+# Subtest: R-F1a network changes between executor quote and pay: refused before signing, DENY, no payment
+ok 99 - R-F1a network changes between executor quote and pay: refused before signing, DENY, no payment
+  ---
+  duration_ms: 5.578396
+  type: 'test'
+  ...
+# Subtest: R-F1a asset changes between executor quote and pay: refused before signing, DENY, no payment
+ok 100 - R-F1a asset changes between executor quote and pay: refused before signing, DENY, no payment
+  ---
+  duration_ms: 6.893521
+  type: 'test'
+  ...
+# Subtest: R-F1a price changes between executor quote and pay: refused before signing, DENY, no payment
+ok 101 - R-F1a price changes between executor quote and pay: refused before signing, DENY, no payment
+  ---
+  duration_ms: 7.450596
+  type: 'test'
+  ...
+# Subtest: R-F1b pay receives the full authorized binding: exact request and the verified intent_hash
+ok 102 - R-F1b pay receives the full authorized binding: exact request and the verified intent_hash
+  ---
+  duration_ms: 6.951008
+  type: 'test'
+  ...
+# Subtest: R-F1c receipt recipient outside the binding: INDETERMINATE (detected, not prevented), never ALLOW
+ok 103 - R-F1c receipt recipient outside the binding: INDETERMINATE (detected, not prevented), never ALLOW
+  ---
+  duration_ms: 6.14385
+  type: 'test'
+  ...
+# Subtest: R-F1c receipt network outside the binding: INDETERMINATE (detected, not prevented), never ALLOW
+ok 104 - R-F1c receipt network outside the binding: INDETERMINATE (detected, not prevented), never ALLOW
+  ---
+  duration_ms: 7.12584
+  type: 'test'
+  ...
+# Subtest: R-F1c receipt asset outside the binding: INDETERMINATE (detected, not prevented), never ALLOW
+ok 105 - R-F1c receipt asset outside the binding: INDETERMINATE (detected, not prevented), never ALLOW
+  ---
+  duration_ms: 3.142192
+  type: 'test'
+  ...
+# Subtest: R-F1c receipt amount outside the binding: INDETERMINATE (detected, not prevented), never ALLOW
+ok 106 - R-F1c receipt amount outside the binding: INDETERMINATE (detected, not prevented), never ALLOW
+  ---
+  duration_ms: 3.584815
+  type: 'test'
+  ...
+# Subtest: R-F2a error after settlement (original F2 reproduction): INDETERMINATE, not DENY
+ok 107 - R-F2a error after settlement (original F2 reproduction): INDETERMINATE, not DENY
+  ---
+  duration_ms: 22.715084
+  type: 'test'
+  ...
+# Subtest: R-F2b connection loss after submission to the payment rail: INDETERMINATE
+ok 108 - R-F2b connection loss after submission to the payment rail: INDETERMINATE
+  ---
+  duration_ms: 6.28239
+  type: 'test'
+  ...
+# Subtest: R-F2c executor response lost between executor and gateway: INDETERMINATE although executor settled
+ok 109 - R-F2c executor response lost between executor and gateway: INDETERMINATE although executor settled
+  ---
+  duration_ms: 9.5773
+  type: 'test'
+  ...
+# Subtest: R-F2d gateway timeout after pay was invoked: INDETERMINATE; journal shows STARTED, later SETTLED
+ok 110 - R-F2d gateway timeout after pay was invoked: INDETERMINATE; journal shows STARTED, later SETTLED
+  ---
+  duration_ms: 25.6877
+  type: 'test'
+  ...
+# Subtest: R-F2e gateway timeout before pay was invoked: still INDETERMINATE (conservative); journal has no entry
+ok 111 - R-F2e gateway timeout before pay was invoked: still INDETERMINATE (conservative); journal has no entry
+  ---
+  duration_ms: 103.962967
+  type: 'test'
+  ...
+# Subtest: R-F2f ambiguous settlement response (settled=false): INDETERMINATE
+ok 112 - R-F2f ambiguous settlement response (settled=false): INDETERMINATE
+  ---
+  duration_ms: 4.260241
+  type: 'test'
+  ...
+# Subtest: R-F2f ambiguous settlement response (null receipt): INDETERMINATE
+ok 113 - R-F2f ambiguous settlement response (null receipt): INDETERMINATE
+  ---
+  duration_ms: 4.79895
+  type: 'test'
+  ...
+# Subtest: R-F2f ambiguous settlement response (missing reference): INDETERMINATE
+ok 114 - R-F2f ambiguous settlement response (missing reference): INDETERMINATE
+  ---
+  duration_ms: 3.280757
+  type: 'test'
+  ...
+# Subtest: R-F2f ambiguous settlement response (non-numeric amount): INDETERMINATE
+ok 115 - R-F2f ambiguous settlement response (non-numeric amount): INDETERMINATE
+  ---
+  duration_ms: 3.684931
+  type: 'test'
+  ...
+# Subtest: R-F2g no automatic retry: pay invoked once; resubmission after INDETERMINATE is AUTH_REPLAY
+ok 116 - R-F2g no automatic retry: pay invoked once; resubmission after INDETERMINATE is AUTH_REPLAY
+  ---
+  duration_ms: 4.532398
+  type: 'test'
+  ...
+# Subtest: R-F2h executor never hands the same intent to pay twice, even with a valid token
+ok 117 - R-F2h executor never hands the same intent to pay twice, even with a valid token
+  ---
+  duration_ms: 2.685349
+  type: 'test'
+  ...
+# Subtest: T4 request modified after authorization (body): INTENT_HASH_MISMATCH, no payment
+ok 118 - T4 request modified after authorization (body): INTENT_HASH_MISMATCH, no payment
+  ---
+  duration_ms: 19.578514
+  type: 'test'
+  ...
+# Subtest: T4 request modified after authorization (body whitespace only): INTENT_HASH_MISMATCH, no payment
+ok 119 - T4 request modified after authorization (body whitespace only): INTENT_HASH_MISMATCH, no payment
+  ---
+  duration_ms: 5.121038
+  type: 'test'
+  ...
+# Subtest: T4 request modified after authorization (url query): INTENT_HASH_MISMATCH, no payment
+ok 120 - T4 request modified after authorization (url query): INTENT_HASH_MISMATCH, no payment
+  ---
+  duration_ms: 3.745414
+  type: 'test'
+  ...
+# Subtest: T4 request modified after authorization (url path): INTENT_HASH_MISMATCH, no payment
+ok 121 - T4 request modified after authorization (url path): INTENT_HASH_MISMATCH, no payment
+  ---
+  duration_ms: 4.317591
+  type: 'test'
+  ...
+# Subtest: T4 request modified after authorization (method): INTENT_HASH_MISMATCH, no payment
+ok 122 - T4 request modified after authorization (method): INTENT_HASH_MISMATCH, no payment
+  ---
+  duration_ms: 3.165117
+  type: 'test'
+  ...
+# Subtest: T4 request modified after authorization (recipient): INTENT_HASH_MISMATCH, no payment
+ok 123 - T4 request modified after authorization (recipient): INTENT_HASH_MISMATCH, no payment
+  ---
+  duration_ms: 2.591398
+  type: 'test'
+  ...
+# Subtest: T4 request modified after authorization (max_amount raised): INTENT_HASH_MISMATCH, no payment
+ok 124 - T4 request modified after authorization (max_amount raised): INTENT_HASH_MISMATCH, no payment
+  ---
+  duration_ms: 2.528985
+  type: 'test'
+  ...
+# Subtest: T4 request modified after authorization (max_amount lowered): INTENT_HASH_MISMATCH, no payment
+ok 125 - T4 request modified after authorization (max_amount lowered): INTENT_HASH_MISMATCH, no payment
+  ---
+  duration_ms: 2.226071
+  type: 'test'
+  ...
+# Subtest: T4 request modified after authorization (network): INTENT_HASH_MISMATCH, no payment
+ok 126 - T4 request modified after authorization (network): INTENT_HASH_MISMATCH, no payment
+  ---
+  duration_ms: 4.047522
+  type: 'test'
+  ...
+# Subtest: T4 request modified after authorization (asset): INTENT_HASH_MISMATCH, no payment
+ok 127 - T4 request modified after authorization (asset): INTENT_HASH_MISMATCH, no payment
+  ---
+  duration_ms: 2.781953
+  type: 'test'
+  ...
+# Subtest: T4 request modified after authorization (service_id): INTENT_HASH_MISMATCH, no payment
+ok 128 - T4 request modified after authorization (service_id): INTENT_HASH_MISMATCH, no payment
+  ---
+  duration_ms: 1.876532
+  type: 'test'
+  ...
+# Subtest: T4 intent_ref modified after authorization (nonce): INTENT_HASH_MISMATCH
+ok 129 - T4 intent_ref modified after authorization (nonce): INTENT_HASH_MISMATCH
+  ---
+  duration_ms: 2.097474
+  type: 'test'
+  ...
+# Subtest: T4 non-canonical / malformed request at the gateway: DENY before hashing completes
+ok 130 - T4 non-canonical / malformed request at the gateway: DENY before hashing completes
+  ---
+  duration_ms: 2.165018
+  type: 'test'
+  ...
+# Subtest: T4 caller mutates its request object after submit: executed request is the hashed one
+ok 131 - T4 caller mutates its request object after submit: executed request is the hashed one
+  ---
+  duration_ms: 4.11094
+  type: 'test'
+  ...
+1..131
+# tests 131
+# suites 0
+# pass 131
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 96684.95784

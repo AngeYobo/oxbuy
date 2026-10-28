@@ -1,316 +1,324 @@
-# OxDeAI x402 Authorization Gateway feasibility for Build with Buy
-
-## Scope and method
-
-This report is intentionally limited to the sponsor-specific Build with Buy / BuyWhere integration path and the generic x402 payment execution path that could be used underneath it.
-
-We did not find an official sponsor package or payment SDK for the Build with Buy challenge in the public repo or package metadata inspected. The sponsor challenge materially appears to be an MCP commerce integration, not a wallet / x402 payment SDK:
-
-- BuyWhere challenge repo: https://github.com/BuyWhere/challenge-build-with-buywhere/blob/main/README.md
-- BuyWhere MCP example repo: https://github.com/BuyWhere/buywhere-mcp-example-v2/blob/main/README.md
-- BuyWhere MCP endpoint: https://api.buywhere.ai/mcp
-- BuyWhere auth registration: https://api.buywhere.ai/v1/auth/register
-
-This means the sponsor-specific integration is currently marked as NOT_TESTED for payment execution unless the sponsor publishes the actual payment/settlement SDK and API contract.
-
-## Findings summary
-
-| Status | Finding |
-|---|---|
-| VERIFIED | BuyWhere sponsor challenge is an MCP commerce integration using `search_products_v2` / `get_product_v2` and requires `deliver_to`. |
-| VERIFIED | The public x402 protocol flow is an HTTP 402 client-signs-verifier-settles lifecycle. |
-| VERIFIED | The client wallet private keys are modeled as client-side credentials in the x402 E2E docs. |
-| VERIFIED | x402 does not define an ERC-8021 attribution tag in the protocol contract docs inspected. |
-| INFERRED | A custom OxDeAI policy enforcement point can gate a wallet-signed payment before execution if the wallet boundary is trusted and isolated. |
-| BLOCKED | Sponsor-specific BuyWithBuy payment SDK / wallet / facilitator contract is not verified in public docs. |
-| NOT_TESTED | Loops project attribution and the exact meaning of `celo_9d43bf3ecad7` under the sponsor rules remain unverified. |
-
-## 1) Sponsor-specific Build with Buy evidence
-
-### 1.1 Sponsor challenge is not a payment SDK
-
-The public challenge repo states that it is a Build With BuyWhere AI agent challenge and that the agent uses BuyWhere MCP. It specifies the required tools and API access, but it does not define an x402 payment SDK or wallet payment flow.
-
-Source:
-- https://github.com/BuyWhere/challenge-build-with-buywhere/blob/main/README.md#L1-L48
-
-Important lines:
-- “Build an AI agent that uses BuyWhere MCP to search, compare, find best prices, or recommend products.”
-- “Add this to your `claude_desktop_config.json` or MCP client config” with `"url": "https://api.buywhere.ai/mcp"` and `"BUYWHERE_API_KEY"`.
-
-This is a commerce MCP integration, not a payment execution endpoint.
-
-### 1.2 Actual sponsor example is a product-search MCP client, not a wallet API
-
-The example repo says it is a minimal Node client for BuyWhere v2 `search_products_v2` with required `deliver_to` parameter. It also lists the endpoint and auth flow. No payment package, wallet client, x402 endpoint, facilitator, or transaction signing API is included.
-
-Source:
-- https://github.com/BuyWhere/buywhere-mcp-example-v2/blob/main/README.md#L1-L59
-- https://github.com/BuyWhere/buywhere-mcp-example-v2/blob/main/README.md#L61-L94
-
-Relevant snippet:
-- MCP server: `https://api.buywhere.ai/mcp`
-- Docs: `https://buywhere.ai/docs/guides/mcp`
-- Free key registration: `https://api.buywhere.ai/v1/auth/register`
-- `search_products_v2 requires deliver_to` and `deliver_to` is required for v2 tools.
-
-### 1.3 Package metadata does not expose a sponsor payment SDK or wallet SDK
-
-The example package metadata confirms a tiny Node 18 client with zero runtime dependencies and a minimal `start` script.
-
-Source:
-- https://github.com/BuyWhere/buywhere-mcp-example-v2/blob/main/package.json#L1-L40
-
-It has:
-- `name: "buywhere-mcp-example-v2"`
-- `dependencies: {}`
-- `optionalDependencies: { "@modelcontextprotocol/sdk": "^1.30.0" }`
-- no wallet / payment / facilitator package
-
-### 1.4 Status for sponsor-specific integration
-
-Conclusion: the public sponsor documentation supports only MCP product discovery and recommendation. It does not document a sponsor-specific x402 payment, authorization, or payment facilitator SDK. Therefore:
-
-- Build with Buy sponsor payment API: NOT_TESTED
-- Sponsor x402 SDK / wallet package / API version: NOT_TESTED
-- Sponsor-specific authorized settlement flow: NOT_TESTED
-
-## 2) Real x402 payment execution lifecycle (verified)
-
-The official x402 documentation and E2E harness describe the actual payment execution model used by x402. These are the primary sources we used.
-
-### 2.1 x402 protocol flow
-
-Source:
-- https://github.com/x402-foundation/x402/blob/main/README.md#L122-L151
-
-Relevant flow:
-1. Client makes an HTTP request.
-2. Resource server responds with `402 Payment Required` and a `PAYMENT-REQUIRED` header containing a base64 payment object.
-3. Client selects one `PaymentRequirements` entry.
-4. Client creates a `PaymentPayload` based on the selected `scheme` + `network`.
-5. Client submits the request with `PAYMENT-SIGNATURE`.
-6. Server verifies the payload through local verification or a facilitator `/verify` call.
-7. If valid, the server serves the request.
-8. The payment is settled either directly or via a facilitator `/settle` call.
-9. A `PAYMENT-RESPONSE` header returns settlement status.
-
-### 2.2 x402 scheme and requirement selection
-
-Source:
-- https://github.com/x402-foundation/x402/blob/main/README.md#L7-L18
-- https://github.com/x402-foundation/x402/blob/main/README.md#L153-L168
-
-The protocol is designed so the client receives the `PaymentRequirements` and chooses one of the accepted `scheme` / `network` combinations. It is not a fixed one-size-fits-all payment object.
-
-### 2.3 Wallet key ownership in the x402 E2E docs
-
-Source:
-- https://github.com/x402-foundation/x402/blob/main/e2e/README.md#L197-L251
-
-This file clearly distinguishes:
-- `CLIENT_*` keys as payer-side wallet credentials
-- `FACILITATOR_*` keys as the verification / settlement side
-
-For example:
-- `CLIENT_EVM_PRIVATE_KEY`
-- `FACILITATOR_EVM_PRIVATE_KEY`
-
-This shows the wallet credentials are the client-side payer credentials, not the server-side resource server or protocol layer.
-
-### 2.4 x402 EVM settlement guardrails
-
-Source:
-- https://github.com/x402-foundation/x402/blob/main/contracts/evm/README.md#L7-L20
-- https://github.com/x402-foundation/x402/blob/main/contracts/evm/README.md#L337-L378
-
-The EVM contract docs state that:
-- the contracts are witness-bound
-- facilitators cannot redirect funds
-- the destination is locked by witness pattern
-- the protocol is designed to be trust-minimizing
-
-## 3) Mandatory authorization boundary analysis
-
-### 3.1 Required properties for a safe pre-signing authorization system
-
-The design question is whether OxDeAI can enforce a mandatory pre-signing authorization boundary for an untrusted AI agent and a trusted payment executor.
-
-This is a valid architecture if the system enforces the following:
-
-- The AI agent does not have direct access to wallet credentials.
-- A separate trusted payment executor holds the signer or signs on its behalf under explicit policy.
-- A policy evaluation point (PEP) validates the exact recipient, network, asset, amount, service and request before signing.
-- Fail-closed behavior prevents signing or forwarding when authorization fails.
-- The exact payment requirement is presented to the payer before signing, not silently altered.
-
-### 3.2 Verified x402 behavior relevant to this design
-
-The x402 protocol is compatible with this boundary because the protocol explicitly exposes the payment requirement to the client and makes the client create the signed payload.
-
-- Payment requirement selection happens before the signed payload is created:
-  - https://github.com/x402-foundation/x402/blob/main/README.md#L129-L145
-- Client-side signers are explicitly modeled in the E2E docs:
-  - https://github.com/x402-foundation/x402/blob/main/e2e/README.md#L197-L251
-
-This means a trusted payment executor can be the component that receives the requirement and decides to sign, as long as it does so as the client-side signer in the x402 model.
-
-### 3.3 Inference: OxDeAI can enforce these controls as a policy boundary
-
-INFERRED, not protocol-required:
-
-- A custom OxDeAI PEP can validate the exact target recipient, chain/network, asset, amount, service identifier, and request context before signing.
-- A fail-closed policy engine can reject signing when any field mismatches the authorize decision.
-- The agent can remain untrusted while the trusted signer stays isolated and limited to the exact approved payment parameters.
-
-This is an application security architecture, not an x402 requirement.
-
-### 3.4 Important caveat: no sponsor payment API is verified
-
-The sponsor-specific Build with Buy path does not publish an x402 payment API, SDK version, or facilitator contract in public docs. That means the actual policy/authorization boundary for the sponsor flow is not verified. The generic pattern is valid, but the sponsor implementation remains BLOCKED until the sponsor publishes the real SDK / API contract.
-
-### 3.5 Decision for authorization boundary
-
-- For generic x402: CONDITIONAL GO, assuming the trusted wallet boundary is isolated and fail-closed.
-- For the sponsor-specific Build with Buy flow: BLOCKED / NOT_TESTED because no sponsor payment API or wallet contract is publicly verified.
-
-## 4) ERC-8021 attribution analysis and Loops interpretation
-
-This part is separate from x402 payment authorization.
-
-### 4.1 x402 does not define a built-in ERC-8021 tag
-
-We inspected the official x402 docs and contract docs and found no ERC-8021 attribution field or tag in the defined payment flow.
-
-- https://github.com/x402-foundation/x402/blob/main/README.md#L122-L151
-- https://github.com/x402-foundation/x402/blob/main/contracts/evm/README.md#L7-L20
-- https://github.com/x402-foundation/x402/blob/main/contracts/evm/README.md#L337-L378
-
-There is no supported field equivalent to `celo_9d43bf3ecad7` in the inspected x402 payment execution lifecycle. This is a VERIFIED finding.
-
-### 4.2 Facilitator-submitted transactions
-
-A facilitator can verify and settle on behalf of the client, but that does not erase the distinction between:
-
-- the wallet that signed the payment intent; and
-- the wallet or relayer that submitted the transaction.
-
-The EVM contract docs state that the facilitator cannot redirect funds and the payment is witness-bound. That preserves the client’s payment intent, but it does not guarantee that a third-party rule engine will count the attribution based on the witness-owner wallet rather than the tx sender.
-
-Source:
-- https://github.com/x402-foundation/x402/blob/main/contracts/evm/README.md#L7-L20
-- https://github.com/x402-foundation/x402/blob/main/contracts/evm/README.md#L337-L378
-
-### 4.3 Loops / attribution rule basis remains unverified
-
-We did not find public sponsor or Loops documentation in the inspected repositories that says whether Loops counts:
-
-- payer wallet from the signed payment witness,
-- transaction sender address,
-- another verified relationship,
-- or a metadata tag outside the x402 protocol.
-
-This part is therefore NOT_TESTED / not verified from public docs.
-
-### 4.4 Conclusion for attribution
-
-- x402 payment authorization and ERC-8021 attribution are distinct concerns.
-- x402 can authorize a payment without carrying a built-in `celo_9d43bf3ecad7` tag.
-- Whether Loops attributes the payment to the agent wallet, tx sender, or another verified relationship is a separate rule system and remains NOT_TESTED.
-
-## 5) Evidence classification
-
-### VERIFIED
-
-- BuyWhere challenge uses MCP commerce endpoints and `deliver_to`-required product search tools:
-  - https://github.com/BuyWhere/challenge-build-with-buywhere/blob/main/README.md#L1-L48
-  - https://github.com/BuyWhere/buywhere-mcp-example-v2/blob/main/README.md#L1-L59
-- x402 payment lifecycle is HTTP 402 -> select requirement -> sign -> verify -> settle -> response:
-  - https://github.com/x402-foundation/x402/blob/main/README.md#L122-L151
-- client keys are client-side in x402 E2E docs:
-  - https://github.com/x402-foundation/x402/blob/main/e2e/README.md#L197-L251
-- x402 settlement contracts are witness-bound and prevent facilitator fund redirection:
-  - https://github.com/x402-foundation/x402/blob/main/contracts/evm/README.md#L7-L20
-  - https://github.com/x402-foundation/x402/blob/main/contracts/evm/README.md#L337-L378
-- x402 does not define an ERC-8021 attribution tag in the inspected protocol sources.
-
-### INFERRED
-
-- A custom OxDeAI gateway may enforce policy checks before signing if the wallet signer is isolated and fail-closed.
-- This is a security architecture pattern that is compatible with the x402 model but not protocol-mandated.
-
-### BLOCKED
-
-- Sponsor-specific Build with Buy payment SDK / wallet API / settlement flow is not verified in the public sponsor docs.
-- An actual x402 payment execution path for the sponsor cannot be confirmed from the public repo alone.
-
-### NOT_TESTED
-
-- Any sponsor-specific or Loops-specific attribution semantics for `celo_9d43bf3ecad7`.
-- Whether Loops counts payments by payer wallet, transaction sender, or another verified relationship.
-- Whether a sponsor SDK exists behind private APIs not public to this repo.
-
-## 6) Decision
-
-### Decision: CONDITIONAL GO (generic x402 architecture only)
-
-A generic x402-style authorization gateway can be designed as a valid architecture when all of the following are true:
-
-1. The AI agent has no direct wallet credentials.
-2. A separate trusted payment executor owns the signing keys.
-3. A fail-closed PEP validates the exact recipient, network, asset, amount, service and request before signing.
-4. The wallet signer only signs an exact approved payment requirement and nothing else.
-5. The sponsor or challenge rules accept the payment witness / approved payer relationship, not only the transaction sender address.
-6. The sponsor-specific Build with Buy API is publicly documented and verified before deployment.
-
-### Blocking conditions
-
-The project is NOT GO if any of the following are true:
-
-- the sponsor’s actual payment API / SDK is not published or verified;
-- the wallet credentials are reachable from the untrusted AI agent;
-- the PEP cannot evaluate the exact recipient, network, asset, amount, service and request before signing;
-- the architecture relies on a signer that is not fail-closed;
-- the challenge requires tx-sender attribution only and does not accept witness-owner or verified payment authorization;
-- the sponsor requires a specific ERC-8021 or Loops attribution mechanism that is not published and verified.
-
-### Sponsor-specific result
-
-Given the public evidence reviewed, the sponsor-specific Build with Buy integration remains NOT_TESTED and is therefore not eligible for a definitive sponsor-specific GO decision. The only defensible decision is: CONDITIONAL GO for a generic x402 security architecture, but BLOCKED for sponsor-specific Build with Buy payment execution until the sponsor publishes the actual SDK / wallet / settlement contract and attribution rules.
-
-## 7) Implementation boundary we would accept
-
-This report is not a code implementation. It is a design boundary only.
-
-The acceptable design is:
-
-- AI agent: untrusted, no wallet credentials
-- PEP: authorized decision engine on exact payment parameters
-- Payment executor: trusted signer / wallet boundary
-- x402 verifier / facilitator: verify signed payload and submit settlement
-- no OxDeAI core change required for a thin integration layer
-
-This boundary is compatible with the x402 docs but is not equivalent to a verified sponsor integration.
-
-## 8) Final conclusion
-
-The public sponsor challenge and the generic x402 protocol are not the same thing. The sponsor challenge documentation is an MCP commerce integration with `deliver_to`-bound product search and no verified wallet or payment API. The x402 protocol itself is a real, documented, client-signed HTTP-402 payment flow, but it does not define the sponsor-specific Build with Buy API, does not define a built-in ERC-8021 attribution tag, and does not answer whether Loops attributes to the payer wallet or transaction sender.
-
-Therefore:
-
-- Generic x402 authorization boundary: CONDITIONAL GO
-- Sponsor-specific Build with Buy payment flow: BLOCKED / NOT_TESTED
-- ERC-8021 attribution and Loops counting logic: NOT_TESTED
-- Final project decision before sponsor docs are published: NO definitive sponsor approval; proceed only as an architecture prototype, not as a production payment claim.
-
-This is the evidence-based position that matches the actual public sources inspected.
-
-## Reference URLs
-
-- Build with BuyWhere challenge: https://github.com/BuyWhere/challenge-build-with-buywhere/blob/main/README.md
-- Build with BuyWhere MCP example: https://github.com/BuyWhere/buywhere-mcp-example-v2/blob/main/README.md
-- BuyWhere MCP endpoint: https://api.buywhere.ai/mcp
-- BuyWhere auth: https://api.buywhere.ai/v1/auth/register
-- x402 README: https://github.com/x402-foundation/x402/blob/main/README.md
-- x402 E2E docs: https://github.com/x402-foundation/x402/blob/main/e2e/README.md
-- x402 EVM contracts: https://github.com/x402-foundation/x402/blob/main/contracts/evm/README.md
+# Feasibility: OxDeAI pre-execution authorization for `@celo/buy`
+
+Target: Loops House "Agents on Open Rails", bounty "Build with buy".
+Sponsor integration: `@celo/buy` (CLI and MCP server), documented in
+`celo-org/buy-skill`. Earlier drafts analyzed a different product (BuyWhere
+MCP); that analysis does not apply to this bounty and has been removed.
+
+## Evidence labels
+
+- **VERIFIED**: stated in a source listed below, at the cited lines.
+  Documentation only: not observed in a running system.
+- **INFERRED**: an architectural conclusion drawn from VERIFIED facts. Not
+  demonstrated.
+- **NOT_TESTED**: requires running real `@celo/buy`, a wallet, or a payment.
+  Not executed.
+- **BLOCKED**: a prerequisite that is unresolved and outside this
+  repository's control.
+
+No `@celo/buy` command was run for this report. No wallet was created or
+imported and no payment was made.
+
+## Sources inspected
+
+Inspected 2026-10-27.
+
+- `celo-org/buy-skill` repository at commit
+  `20329cef3965f17af4367dd432581079a9cf05a6` (2026-10-23):
+  - `README.md` (105 lines)
+  - `skills/use-api-gateway/SKILL.md` (284 lines)
+  - `skills/order-compute/SKILL.md` (601 lines)
+  - `skills/file-feedback/SKILL.md` (336 lines)
+  - `.github/ISSUE_TEMPLATE/list-your-service.yml`
+- npm registry metadata for `@celo/buy` (`npm view`, no install): `latest` =
+  `0.8.4`; versions 0.6.0 … 0.8.4; `bin: buy`; no `repository` field.
+- Loops event skill in this repo,
+  `.agents/skills/loops-agents-on-open-rails/SKILL.md` (identical copy in
+  `.claude/skills/`).
+
+Line references below use `README`, `GW` (use-api-gateway), `OC`
+(order-compute), `FB` (file-feedback) and `LOOPS` (the Loops skill).
+Permalink base:
+`https://github.com/celo-org/buy-skill/blob/20329cef3965f17af4367dd432581079a9cf05a6/`.
+
+Not inspected: the `@celo/buy` source code (the repository above contains
+skills, not the CLI; the npm package lists no source repository), the
+gateway implementation, and the facilitator.
+
+## 1. What `@celo/buy` is (VERIFIED)
+
+- An x402 payment client for Celo that lets a CLI or AI agent pay for HTTP
+  APIs in stablecoins (README L3).
+- MCP tools: `buy_pay_quote`, `buy_curl`, `buy_balance`, `buy_whoami`,
+  `buy_verify_status` (README L37-38), plus `buy_discover` (GW L32-44).
+- Setup creates a wallet in the OS keychain: `npx --yes @celo/buy@0.8.4
+  setup --name <name>` (README L41, OC L145-148). Documentation pins
+  `0.8.4` throughout; the gateway skill requires 0.8.4 or newer (GW L14).
+- "The server signs with the keychain wallet in its own process; the agent
+  never receives key material." (README L45-46, OC L185-186)
+- The CLI does everything the MCP tools do; MCP is optional (README L48-49,
+  OC L177-178).
+- Gateways: `https://gateway.usebuy.ai` for APIs (GW L8-10) and
+  `https://usebuy.ai/google/vm` for compute (OC L11-13). Upstream provider
+  credentials stay on the gateway (GW L9, GW L22-23).
+- Settlement is real USDC, USDT, or USAT on Celo mainnet, irreversible, with
+  no refund primitive in x402 (README L56, L61-64; OC L15). There is no
+  testnet deployment (OC L44-47).
+
+## 2. Payment execution flow (VERIFIED)
+
+1. Discover the capability (`buy_discover` or the free `GET /v1/catalog`)
+   (GW L30-75).
+2. Quote the exact method, URL, headers, and body without paying:
+   - MCP `buy_pay_quote` with `url`, `method`, optional `headers`, and `body`
+     as a raw JSON string (GW L173-181, OC L239-248);
+   - CLI `buy quote …` or an unpaid `curl` (GW L160-166, OC L304-322).
+   `buy_pay_quote` "is read-only and does not sign or pay" (GW L185-186,
+   OC L251-252). `buy quote` "needs no wallet and never signs" (OC L307).
+3. Read the price: `price.atomic` / `price.token` from the MCP quote, which
+   is the selected requirement's `maxAmountRequired` from the raw 402
+   (GW L183-185, OC L250-251). The 402 challenge is the price authority;
+   catalog prices are indicative (GW L28, OC L75-76).
+4. Obtain approval for the exact token and maximum "unless the user's
+   request already authorizes that spend" (GW L20-21, OC L42-43, L252-253).
+5. Pay by repeating the identical request:
+   - MCP `buy_curl` with the same `url`, `method`, `headers`, `body`, and
+     `maxAmount` (GW L189-197, OC L255-264);
+   - CLI `buy curl --max-amount <amount> …` (GW L215-223, OC L271-286).
+6. The response carries the transaction hash and result; never retry
+   ambiguous outcomes (`500 settle_uncertain`, network loss after sending)
+   (GW L263-280, OC L540-567).
+
+### Point where payment parameters become final
+
+The paid call in step 5 is where method, URL, headers, body, token, and
+`maxAmount` are fixed and the wallet signs. A pre-execution authorization
+gate must sit **before** `buy_curl` / `buy curl` is invoked. Quoting (step 2)
+does not need to be gated for funds safety because it never signs.
+(INFERRED from the facts above.)
+
+### Amount units differ by interface (VERIFIED, security-relevant)
+
+- MCP `maxAmount`, `price.atomic`, and the raw 402 `maxAmountRequired` are
+  **atomic** units (GW L199, OC L266, OC L290-291).
+- CLI `--max-amount` is a **decimal token amount** (GW L225, OC L290). The
+  docs warn that `--max-amount 16753` "would authorize 16,753 USDC"
+  (OC L292-293).
+
+A PEP that authorizes an atomic amount must convert it exactly when it
+drives the CLI. A unit error here turns a cent into thousands of dollars.
+
+### Controls that `@celo/buy` itself provides (VERIFIED)
+
+- A daily spend cap per account, in whole stablecoin units, across all
+  stablecoins: `buy account cap <name> 1.00` (OC L156-168). A cap refusal is
+  "refused client-side before signing" (FB L147).
+- A client-side balance check before signing (OC L545; FB L147).
+- `no_matching_requirements` when the account's network does not match;
+  nothing is signed (OC L555).
+
+What `@celo/buy` does **not** provide, per its own docs:
+
+- Per-payment approval. "Nothing prompts per payment." (README L74) The
+  approval step in the skills is guidance to the agent, and it is waived
+  when "the user's request already authorizes that spend" (GW L20-21).
+- Any binding of a payment to a specific approved request, recipient, or
+  service beyond what the agent chooses to pass to `buy_curl`.
+
+This is the gap OxDeAI addresses: buy limits *how much* per day; it does not
+decide *whether this specific payment* is authorized. (INFERRED)
+
+### Settlement transaction (VERIFIED)
+
+- The gateway's sponsor wallet pays gas for x402 settlements (README
+  L56-58, OC L153-154).
+- "The facilitator broadcasts the settlement, so it never appears in the
+  payer's Transactions list"; the payment appears only as a token transfer
+  from the payer to the gateway's `payTo` (OC L587-592).
+- The `usebuy.ai` gateway returns `"x402Version": 1`; Celo's public
+  facilitator and `@x402/express` issue version 2 (OC L298-302).
+
+## 3. Trust boundary and enforceability
+
+### Trust boundary: VERIFIED
+
+- The signing key lives in the OS keychain, and the MCP server or CLI signs
+  in its own process (README L45-46).
+- The documented MCP registration launches the server through the agent
+  client: `claude mcp add -s user buy -- npx --yes @celo/buy@0.8.4 mcp serve`
+  (README L53, OC L191).
+
+### Trust boundary: INFERRED
+
+- "The agent never receives key material" is not the same as "the agent
+  cannot pay". Any process that can call `buy_curl` or run `buy curl` with
+  the same OS user and keychain can make payments up to the daily cap.
+- In the documented default setup the MCP server is started by the agent's
+  MCP client under the same OS user. An agent with shell access in that user
+  context can therefore run `buy curl` directly. This is a bypass of any PEP
+  that sits only in front of the MCP tools.
+- OxDeAI can be a mandatory pre-execution gate only if:
+  1. the agent is not given the `buy_curl` tool, the `buy` CLI, or the
+     keychain;
+  2. the buy process (MCP server or CLI) runs as a separate OS user or
+     sandbox that the agent cannot execute as or read from;
+  3. the only caller of that process is a trusted executor that runs after
+     OxDeAI verification;
+  4. the executor passes exactly the authorized method, URL, headers, body,
+     token, and `maxAmount`, converting units correctly for the CLI.
+- The buy daily cap remains useful as a second, independent ceiling.
+
+### Bypass paths that must be closed
+
+- **Agent has `buy_curl` in its MCP tool list**: pays any request without
+  OxDeAI.
+- **Agent can run `buy` / `npx @celo/buy` as the wallet's OS user**: same
+  keychain wallet, same signing path.
+- **Agent can read the keychain entry, or run `setup --import`**: holds or
+  replaces the key.
+- **Executor forwards fields the agent can change after authorization**:
+  pays for a different request than the one authorized.
+- **CLI used with an atomic value passed to `--max-amount`**: ceiling raised
+  by 10^6.
+
+### Generic x402 binding (INFERRED, independent of buy)
+
+Because the 402 price depends on the request body (README L67-68, OC L41),
+an authorization must bind the exact method, URL, headers, and body, plus
+network, token, recipient (`payTo`), and maximum amount. Retries are new
+payments (OC L561-567), so each authorization should be single-use; this
+matches OxDeAI's `auth_id` replay consumption.
+
+## 4. ERC-8021 attribution and Loops rules
+
+### Attribution: VERIFIED (Loops skill in this repository)
+
+- A transaction is credited only if "its calldata carries the entry's
+  ERC-8021 attribution tag", and untagged transactions are never credited
+  (LOOPS L239).
+- The tag must be read from `loops project get` and never derived (LOOPS
+  L243-249).
+- The "agent wallet" is "the public address the agent sends its
+  transactions from" (LOOPS L286). For smart-account wallets, whose bundler
+  sends the transaction, the hash must be pasted manually (LOOPS L284).
+- The Build with buy bounty is measured by "verified paid calls from the
+  project's tagged wallet on Celo mainnet" (LOOPS L153, L156).
+- ERC-8004 identity must be registered from the agent wallet (LOOPS L295).
+
+### Attribution: VERIFIED (buy-skill)
+
+- No file in `celo-org/buy-skill` mentions ERC-8021, attribution tags, or a
+  data suffix. The only related field is an optional "ERC-8004 agent id on
+  Celo" in the service-listing form (`list-your-service.yml` L99-101).
+
+### Attribution: INFERRED
+
+- A buy payment is an off-chain authorization signed by the payer and
+  broadcast by the facilitator, with gas paid by the gateway sponsor. The
+  agent wallet does not send that transaction and does not build its
+  calldata. `withAttribution` / `dataSuffix` as described in LOOPS L251-270
+  therefore cannot be applied by the project to buy settlement
+  transactions.
+- Whether "paid calls from the project's tagged wallet" means the payer
+  address of facilitator-sent transfers, or requires a tag in the
+  settlement calldata, is not stated in either source.
+
+### Attribution: BLOCKED
+
+- How Loops credits buy payments for this bounty, given that the payer
+  does not send the settlement transaction. Needs an answer from Loops or
+  the sponsor (for example via `loops knowledge query --sponsor
+  build-with-buy`) before any mainnet payment.
+- The project's official tag. The value `celo_9d43bf3ecad7` cited in an
+  earlier draft was not re-read from `loops project get` in this review.
+
+## 5. Evidence summary
+
+### Summary: VERIFIED
+
+Everything in sections 1, 2, the VERIFIED part of section 3, and the
+VERIFIED parts of section 4, at the cited lines.
+
+### Summary: INFERRED
+
+- The gating point is before `buy_curl` / `buy curl`.
+- OxDeAI fills a gap buy does not cover: per-payment, request-bound
+  authorization.
+- The documented default MCP setup lets an agent with shell access bypass a
+  tool-level PEP. Enforcement requires OS-level separation.
+- The project cannot attach an ERC-8021 tag to buy settlement transactions.
+
+### Summary: NOT_TESTED
+
+- Any real `buy_pay_quote`, `buy_curl`, `buy quote`, or `buy curl` call.
+- Whether `buy_curl` / `buy curl` refuses before signing when the live
+  price exceeds `maxAmount`. The docs call it the approved maximum (GW L271,
+  OC L292-293) but do not state the refusal behavior.
+- MCP response schemas beyond `price.atomic` / `price.token`.
+- Running the buy MCP server or CLI under a separate OS user from the agent.
+- Daily-cap behavior in practice.
+- Celo mainnet settlement, ERC-8021 tagging, ERC-8004 registration.
+
+### Summary: BLOCKED
+
+- Loops crediting rule for facilitator-broadcast buy payments (section 4).
+- Official attribution tag, read from `loops project get`.
+- Explicit approval to spend real funds on mainnet (required by AGENTS.md).
+- A funded agent wallet, which does not exist and must not be created
+  without that approval.
+
+## 6. Local prototype results (Phase 1)
+
+The local prototype implements the architecture above with the published
+OxDeAI packages (`@oxdeai/core@2.0.2`, `@oxdeai/guard@2.0.3`) and a **mock**
+buy adapter. The suite was executed: 43 tests, 43 pass. Details:
+`docs/CONFORMANCE.md`, `docs/ARCHITECTURE.md`, `evidence/test-results.txt`.
+
+These results are evidence about the OxDeAI gateway logic only. They are
+not evidence about `@celo/buy`, the gateway, Celo, or OS-level isolation.
+The `@celo/buy` adapter in `src/adapters/celo-buy/` is an interface stub.
+
+## 7. Acceptance criteria for live integration
+
+These are criteria for Phase 2. None has been executed against real buy.
+
+| Criterion | Status |
+| --- | --- |
+| Mismatched request denied; `buy_curl` / `buy curl` not invoked | NOT_TESTED |
+| PEP allows an exact, capped request; buy executes it unchanged | NOT_TESTED |
+| Policy cap exceeded: PEP denies before buy signs | NOT_TESTED |
+| Agent cannot run `buy`, call `buy_curl`, or read the keychain | NOT_TESTED |
+| CLI path converts atomic amounts to decimal exactly | NOT_TESTED |
+| Live price above authorized max: no settlement | NOT_TESTED |
+| Settlement is credited by Loops to this entry | BLOCKED |
+
+## 8. Decision
+
+### Local prototype feasibility: GO (demonstrated)
+
+The OxDeAI gateway pattern of binding, expiry, replay, signature, and
+fail-closed checks before a payment adapter is implemented and tested
+locally with a mock adapter (section 6). The buy interfaces it must drive
+are documented well enough to define the adapter contract (section 2).
+
+### Live `@celo/buy` integration readiness: NOT READY
+
+Technically, the integration is CONDITIONAL: feasible if the conditions in
+section 3 hold, which requires OS-level separation of the buy process from
+the agent. None of this has been built or tested.
+
+It is NOT READY for hackathon mainnet activity because of the BLOCKED
+items:
+
+1. The Loops crediting rule for facilitator-broadcast buy payments is
+   unconfirmed. The project cannot tag those transactions itself.
+2. The official tag has not been read from Loops in this review.
+3. No approval exists to spend real funds, and no wallet exists.
+
+### Claims not supported
+
+Do not claim that:
+
+- `@celo/buy` payments carry an ERC-8021 tag or are credited by Loops;
+- the OxDeAI gate is non-bypassable against real buy (not tested);
+- `buy_curl` enforces `maxAmount` before signing (not documented, not tested).

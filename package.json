@@ -1,0 +1,26 @@
+{
+  "name": "oxdeai-celo-poc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OxDeAI pre-execution authorization gateway for x402 payments via @celo/buy (Phase 1: local mock only)",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "dependencies": {
+    "@oxdeai/core": "2.0.2",
+    "@oxdeai/guard": "2.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test \"tests/**/*.test.ts\"",
+    "test:evidence": "node --test --test-reporter=spec --test-reporter-destination=evidence/test-results.txt --test-reporter=tap --test-reporter-destination=evidence/test-results.tap \"tests/**/*.test.ts\"",
+    "demo": "node src/demo.ts",
+    "demo:isolated": "node src/demo-isolated.ts"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "artifact": "7d7d0bf480a5eea9a5e0d5ddda65e78b5bd6d2513efd1d8d59b23960d6947f74",
+  "processes": {
+    "operator_uid": 1000,
+    "gateway_pid": 55352,
+    "executor_pid": 55341
+  },
+  "agent": {
+    "agent_uid": 999,
+    "weather": {
+      "stage": "purchase",
+      "result": {
+        "decision": "ALLOW",
+        "executed": true,
+        "status": 200,
+        "receipt": {
+          "settled": true,
+          "reference": "mock-cb6e8c0d8b9a284cc4afdb6fa781cac9",
+          "network": "mock-celo",
+          "asset": "mock-usdc",
+          "amount": "10000",
+          "pay_to": "0x1111111111111111111111111111111111111111",
+          "response_status": 200,
+          "response_body": "{\"mock\":true,\"service_id\":\"weather-api\"}"
+        },
+        "auth_id": "135420c9bef19194814d9416ff354d70b6ab51b254cd595917efc4a9dcda3bbf",
+        "intent_hash": "aca7a6c1ae4fd6fbfb0f35f3f0204ebc84e6fe50ca2cc039ffeb23ce41550d82"
+      }
+    },
+    "unlisted": {
+      "stage": "authorize",
+      "decision": "DENY",
+      "reasons": [
+        "ALLOWLIST_TARGET"
+      ]
+    },
+    "executor_socket_connect": "EACCES",
+    "wallet_key_read": "EACCES"
+  },
+  "ledger_payments": 1,
+  "journal": [
+    {
+      "intent_hash": "aca7a6c1ae4fd6fbfb0f35f3f0204ebc84e6fe50ca2cc039ffeb23ce41550d82",
+      "state": "SETTLED"
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "generated_by": "node src/demo.ts --json",
+  "mock_only": true,
+  "rows": [
+    {
+      "scenario": "Authorized payment",
+      "expected": "ALLOW",
+      "decision": "ALLOW",
+      "executed": true,
+      "reason": "",
+      "payments": 1
+    },
+    {
+      "scenario": "Unauthorized service",
+      "expected": "DENY",
+      "decision": "DENY",
+      "executed": false,
+      "reason": "PDP:ALLOWLIST_TARGET",
+      "payments": 0
+    },
+    {
+      "scenario": "Unauthorized recipient",
+      "expected": "DENY",
+      "decision": "DENY",
+      "executed": false,
+      "reason": "PDP:ALLOWLIST_TARGET",
+      "payments": 0
+    },
+    {
+      "scenario": "Amount exceeds policy cap",
+      "expected": "DENY",
+      "decision": "DENY",
+      "executed": false,
+      "reason": "PDP:PER_ACTION_CAP_EXCEEDED",
+      "payments": 0
+    },
+    {
+      "scenario": "Body modified after authorization",
+      "expected": "DENY",
+      "decision": "DENY",
+      "executed": false,
+      "reason": "INTENT_HASH_MISMATCH",
+      "payments": 0
+    },
+    {
+      "scenario": "Expired authorization",
+      "expected": "DENY",
+      "decision": "DENY",
+      "executed": false,
+      "reason": "AUTH_EXPIRED",
+      "payments": 0
+    },
+    {
+      "scenario": "Replayed authorization (2nd use)",
+      "expected": "DENY",
+      "decision": "DENY",
+      "executed": false,
+      "reason": "AUTH_REPLAY",
+      "payments": 1
+    },
+    {
+      "scenario": "Invalid signature",
+      "expected": "DENY",
+      "decision": "DENY",
+      "executed": false,
+      "reason": "AUTH_SIGNATURE_INVALID",
+      "payments": 0
+    },
+    {
+      "scenario": "Policy state unavailable",
+      "expected": "DENY",
+      "decision": "DENY",
+      "executed": false,
+      "reason": "PDP:POLICY_STATE_UNAVAILABLE:POLICY_STATE_UNAVAILABLE",
+      "payments": 0
+    },
+    {
+      "scenario": "Direct executor call, no token",
+      "expected": "DENY",
+      "decision": "DENY",
+      "executed": false,
+      "reason": "EXECUTOR_HTTP_403",
+      "payments": 0
+    }
+  ]
+}

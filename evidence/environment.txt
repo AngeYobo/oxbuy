@@ -1,0 +1,38 @@
+# Phase 2B / 2B-R3 evidence environment
+date_utc: 2026-10-27T21:38:11Z
+node: v24.21.0
+npm: 11.19.0
+os: Linux 6.8.0-1064-azure
+distro: Ubuntu 24.04.5 LTS
+codespace: CODESPACES=true (disposable container; /.dockerenv present)
+git_branch: feat/phase-2b-trust-separation
+git_head: e7c43c2b4f030d9ebadfa0176920feb6e50ef792
+working_tree: uncommitted Phase 2B + 2B-R1/R3 implementation on top of git_head (see docs/CONFORMANCE.md)
+
+## OS identities
+operator: uid=1000(codespace) gid=1000(codespace) groups=1000(codespace),986(pipx),987(python),988(oryx),989(golang),990(docker),991(sdkman),992(ruby),993(php),994(conda),995(nvm),996(hugo),1001(ssh)
+oxdeai-agent: uid=999(oxdeai-agent) gid=985(oxdeai-agent) groups=985(oxdeai-agent) shell=/usr/sbin/nologin password=L sudo=none
+oxdeai-gateway: uid=996(oxdeai-gateway) gid=984(oxdeai-gateway) groups=984(oxdeai-gateway) shell=/usr/sbin/nologin password=L sudo=none
+oxdeai-auth: uid=995(oxdeai-auth) gid=983(oxdeai-auth) groups=983(oxdeai-auth) shell=/usr/sbin/nologin password=L sudo=none
+oxdeai-executor: uid=994(oxdeai-executor) gid=982(oxdeai-executor) groups=982(oxdeai-executor) shell=/usr/sbin/nologin password=L sudo=none
+operator sudo: (root) NOPASSWD: ALL
+sudoers.d/codespace sha256: f74cd94e10f1fb3aae306e9b9131622df93d7b4e4f4abbf0cc4a99eb2f08fed1 (unchanged)
+identity switch: sudo -n setpriv --reuid --regid --clear-groups --no-new-privs --reset-env
+writer lock: flock from util-linux 2.39.3 at /usr/bin/flock
+
+## Approved artifact used for demo-isolated-output.json (scratch store)
+artifact: 7d7d0bf480a5eea9a5e0d5ddda65e78b5bd6d2513efd1d8d59b23960d6947f74
+
+## npm ls
+oxdeai-celo-poc@0.1.0 /workspaces/oxdeai-celo-poc
+├── @oxdeai/core@2.0.2
+├─┬ @oxdeai/guard@2.0.3
+│ └── @oxdeai/core@2.0.2 deduped
+├─┬ @types/node@24.10.1
+│ └── undici-types@7.16.0
+└── typescript@5.9.3
+
+
+## integrity
+node_modules/@oxdeai/core 2.0.2 sha512-Q569TNq/S8tG32FvPfCPTRVYFwGMNH5GjBlHMVuyoaaqYwrSvkJ9yhI503HBZ7wi/BjXYevijosqTVugmEZ2jA==
+node_modules/@oxdeai/guard 2.0.3 sha512-bzp7GA6VyA6PTt/BA9HRuTsZc8Nx9mlWeQiARcoqv8SDtXSQMkZMWY9SBAEDV3b+ofar+4LyLGRHmwKGv6bTuw==
