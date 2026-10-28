@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: MIT
 /**
- * Phase 2A demo: three processes, two OS identities, mock payments only.
+ * Phase 2B demo: agent, gateway, auth service, and executor, each under its
+ * own OS account (oxdeai-agent / -gateway / -auth / -executor), mock
+ * payments only.
  *
  *   npm run demo:isolated
  *
  * Launches only the operator-approved artifact from the trust store
  * ($OXDEAI_TRUST_STORE or ~/.oxdeai-celo-poc/trust); never the checkout.
- * Exits 2 (BLOCKED) if there is no approved artifact or the agent cannot be
- * run as a separate OS identity. Agent programs are taken from the current
+ * Exits 2 (BLOCKED) if there is no approved artifact, no initialized policy
+ * state ($OXDEAI_POLICY_STATE_ROOT), or the agent cannot be run as a
+ * separate OS identity. Agent programs are taken from the current
  * directory (they are untrusted and must be readable by the agent).
  */
 import { join } from "node:path";
@@ -24,6 +27,9 @@ const identity = agentIdentityUnavailableReason();
 if (identity !== null) blocked(identity);
 const store = defaultTrustStore();
 if (approvedDigest(store) === null) blocked(`no approved artifact in ${store}; run trust-cli seal and approve (docs/ISOLATION.md §3)`);
+if (!process.env.OXDEAI_POLICY_STATE_ROOT) {
+  blocked("no policy state: set OXDEAI_POLICY_STATE_ROOT to an initialized state root (policy-cli.ts provision + init; docs/ISOLATION.md §3b)");
+}
 
 // Verifies the approved artifact before importing any of it.
 const { launchIsolatedSystem } = await loadVerifiedLauncher({ store });

@@ -2,9 +2,11 @@
 /**
  * Process C: protected payment executor.
  *
- * Runs as the executor's OS identity. Listens only on a Unix-domain socket
- * inside its private directory; holds the internal executor token, the mock
- * wallet key, the mock ledger, and the durable payment journal.
+ * Runs as the executor's OS identity (oxdeai-executor). Listens only on a
+ * Unix-domain socket in exec-ipc/ (setgid directory executor:gateway 2750,
+ * socket 0660), so only the gateway identity can connect. Holds the internal
+ * executor token, the mock wallet key, the mock ledger, and the durable
+ * payment journal; never the authorization signing key.
  *
  *   node executor-main.ts <executor-config.json>
  */
@@ -44,7 +46,7 @@ const executor = createPaymentExecutor({
 });
 
 const delay = config.faults?.delayResponseMs ?? 0;
-const server = await serveJson(config.socketPath, 0o600, {
+const server = await serveJson(config.socketPath, 0o660, {
   "/v1/execute": async (body, headers) => {
     const res = await executor.handle(body, headers);
     if (delay) await sleep(delay);

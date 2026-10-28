@@ -1,13 +1,39 @@
-# Conformance: Phase 1, Phase 1R, Phase 2A, and Phase 2A-R
+# Conformance: Phase 1, 1R, 2A, 2A-R, 2B, 2B-R3, and the 2B-R4 audit
 
 Results are from `npm run test:evidence` on 2026-10-27 (Node.js v24.21.0,
-`@oxdeai/core@2.0.2`, `@oxdeai/guard@2.0.3`), run on the Phase 2A working
-and 2A-R working tree (uncommitted) on top of git HEAD `dcfb5dd`, branch
-`feat/phase-2a-process-isolation`. Raw output: `evidence/test-results.txt`
+`@oxdeai/core@2.0.2`, `@oxdeai/guard@2.0.3`), run on the Phase 2B / 2B-R3
+working tree (uncommitted) on top of git HEAD `e7c43c2`, branch
+`feat/phase-2b-trust-separation`. Raw output: `evidence/test-results.txt`
 (spec) and `evidence/test-results.tap` (TAP). Environment, OS identities,
 and package integrity hashes: `evidence/environment.txt`.
 
-Summary: 119 tests, 119 pass, 0 fail, 0 skipped.
+**Evidence provenance and artifact digests (Phase 2B-R5).**
+- **What the evidence is.** The tracked evidence files record the Phase
+  2B-R3 run and were not regenerated in R5. They include
+  `evidence/demo-isolated-output.json`, whose artifact digest is
+  `7d7d0bf480a5eea9a5e0d5ddda65e78b5bd6d2513efd1d8d59b23960d6947f74`.
+- **Why the digest changed.** R5 corrected documentation and source
+  comments only. Comments are part of the sealed source, so the current tree
+  seals to a different artifact:
+  `4fac3d75d2fe7d7a7fd9cd4d632606a0a3329b28668e7146faf5423c6c3ab1f8`.
+- **How both were recomputed.** Each was computed with the canonical
+  procedure, `trust-cli.ts seal`, into disposable scratch stores. The R5
+  digest came out identical in three separate seals. Sealing the pre-R5
+  sources (a copy outside the repository with the seven pre-R5 files
+  restored) reproduced the R3 digest exactly.
+- **What each digest still covers.** `7d7d0bf4…` identifies only the exact
+  R3 artifact. An approval of it does not authorize the R5 artifact: with
+  only R3 approved, loading R5 gave `ARTIFACT_NOT_APPROVED`. Running the
+  current tree requires approving the newly sealed `4fac3d75…`.
+- **R5 re-run results.**
+  - Suite: 131 tests, 131 pass, 0 fail, 0 skipped, 0 cancelled, same test
+    names as the evidence; output written to a scratch location.
+  - `npm run demo`: byte-identical to `evidence/demo-output.json`.
+  - `demo:isolated` with `4fac3d75…` approved in a scratch store: agent uid
+    999, weather ALLOW, unlisted DENY `ALLOWLIST_TARGET`, executor socket and
+    wallet `EACCES`, 1 mock payment, journal SETTLED.
+
+Summary: 131 tests, 131 pass, 0 fail, 0 skipped.
 - 43 are the original Phase 1 tests.
 - 39 are the Phase 1R regression tests. One of them, R-F2h, was adapted to
   the executor's new request envelope; its invariant is unchanged.
@@ -15,9 +41,27 @@ Summary: 119 tests, 119 pass, 0 fail, 0 skipped.
   tests. Since Phase 2A-R, the isolation tests launch from a sealed,
   approved artifact.
 - 10 are new in Phase 2A-R: source-integrity tests SI-01..SI-07.
+- 12 are new in Phase 2B-R3: durable-budget tests R3-F1a..R3-F4e
+  (`tests/isolation/policy-state.test.ts`).
+- Since Phase 2B, every process-level test runs under four dedicated accounts
+  (`oxdeai-agent`, `-gateway`, `-auth`, `-executor`). Phase 2B-R1 adapted the
+  Phase 2A/2A-R tests to that layout: checks of protected resources now go
+  through their owning identity or sudo, and no assertion was removed.
+- P2B-01..P2B-20 were executed as scripted review experiments (Phase
+  2B-R2) and independently reproduced in the Phase 2B-R4 audit. Neither set
+  of scripts is in this repository, and they are not tests in `npm test`;
+  the "Automated coverage" column under "Phase 2B" says which existing
+  tests cover each control.
+- The R4 audit also found N1-N4 and confirmed F3, F5, and B6 by experiment;
+  see "Phase 2B-R4 independent audit". The Phase 2B-R5 update changed only
+  documentation and source comments, and re-ran the suite (same 131
+  results).
 
 Status meanings:
 - **PASS:** an automated test was executed and passed.
+- **PASS (manual):** a scripted or manual experiment was executed and
+  passed, but no committed automated test repeats it. Used for the P2B and
+  R4 rows.
 - **FAIL:** executed and failed.
 - **NOT_TESTED:** no executed test supports it.
 - **BLOCKED:** cannot be executed in this environment without approval or
@@ -26,8 +70,8 @@ Status meanings:
 
 All results are against the mock payment adapter. None of them is evidence
 about real `@celo/buy`, Celo, or a wallet. The Phase 1 and 1R sections run
-in a single process. The Phase 2A section runs separate processes under two
-OS identities.
+in a single process. The Phase 2A sections ran separate processes under two
+OS identities; since Phase 2B they run under four.
 
 ## Mandated tests
 
@@ -113,11 +157,18 @@ branch (unreachable by construction: `execute` catches all errors).
 
 Commands: `npm test` (whole suite), or
 `node --test tests/isolation/process-isolation.test.ts`. Each test launches
-its processes through `src/isolation/launcher.ts`:
+its processes through `src/isolation/launcher.ts`. As recorded below (Phase
+2A, historical):
 - **Agent:** `tests/isolation/agent-probe.ts`, running as `nobody` (uid
   65534, `no_new_privs`).
 - **Gateway and executor:** `codespace` (uid 1000), running from a sealed,
   approved artifact in an operator-only trust store (since Phase 2A-R).
+
+Since Phase 2B the same tests run the agent as `oxdeai-agent` and the
+gateway, auth service, and executor under their own accounts. The "Observed
+result" column keeps the Phase 2A observations. The current run passes the
+same security assertions, adapted to the four-account layout in Phase 2B-R1
+(for example, socket modes 0660 in setgid directories).
 
 Every OS-level assertion is an errno that the kernel returned to the agent
 process. Each sits next to a positive control showing the same resource
@@ -149,7 +200,7 @@ works for its intended user.
 | --- | --- | --- | --- |
 | J1 | Records survive close and reopen; a reserved intent is never reserved again | PASS | SETTLED and receipt read back after reopen; re-reserve gives `DUPLICATE_INTENT`, prior SETTLED |
 | J2 | `auth_id` consumed durably | PASS | Same auth_id for another intent after reopen gives `AUTH_REPLAY` |
-| J3 | Single writer; stale lock recovery | PASS | Second open gives `JOURNAL_LOCKED`; lock with a dead pid is recovered (`staleLockRecovered: true`) |
+| J3 | Second writer refused while the first is alive; stale lock recovery | PASS | Second open gives `JOURNAL_LOCKED`; lock with a dead pid is recovered (`staleLockRecovered: true`). Sequential cases only: two processes racing on the same stale lock can both open as writers (B6, R4) |
 | J4 | Crash recovery never auto-converts STARTED | PASS | After simulated crash: STARTED stays STARTED; STARTED and UNKNOWN are listed in `needsReconciliation`; re-reserve gives prior STARTED |
 | J5 | Only STARTED moves to a final state, once | PASS | `JOURNAL_ILLEGAL_TRANSITION:SETTLED->UNKNOWN`; path-traversal hash rejected |
 | J6 | Permissions despite `/tmp` default ACL | PASS | Dirs 0700, every file 0600 |
@@ -179,26 +230,28 @@ This table separates when a finding was found from where it stands now.
 | Finding | Found in | Status at discovery | Current status | Evidence |
 | --- | --- | --- | --- | --- |
 | Agent can plant source or dependencies that run as the operator at the next launch | Phase 2A pre-commit review | FAIL (reproduced: uid 1000) | **PASS** (remediated in 2A-R) | SI-01..07; mutation tests |
-| Budget not enforced across gateway restart: fresh intents get a fresh budget | Phase 2A pre-commit review | FAIL (reproduced: 40,000 spent against a 20,000 budget) | **FAIL** (open) | `docs/ISOLATION.md` A8 |
-| Compromised gateway can pay without the executor (reads the wallet key; holds the PDP signing key) | Phase 2A pre-commit review | FAIL (reproduced: ledger +1, no journal record) | **FAIL** (open, design) | `docs/ISOLATION.md` A1 |
-| Stale-lock takeover race between two starting executors | Phase 2A pre-commit review | NOT_TESTED (not reproduced in 5 races) | NOT_TESTED | per-intent O_EXCL still prevents a duplicate payment |
+| Budget not enforced across gateway restart: fresh intents get a fresh budget | Phase 2A pre-commit review | FAIL (reproduced: 40,000 spent against a 20,000 budget) | **PASS** (Phase 2B moved policy state out of the gateway; 2B-R3 made it persistent) | R3-F1b, R3-F2a, R3-F4e |
+| Compromised gateway can pay without the executor (reads the wallet key; holds the PDP signing key) | Phase 2A pre-commit review | FAIL (reproduced: ledger +1, no journal record) | **PASS (manual) within the gateway identity's privileges** (Phase 2B; R2 review, reproduced by R4) | P2B-02..05, P2B-20 (review evidence) |
+| Stale-lock takeover race between two starting executors | Phase 2A pre-commit review | NOT_TESTED (not reproduced in 5 races) | **FAIL (manual, R4)** for single-writer locking: both executors opened the journal as writers in 11 of 150 mock races. Open (B6) | Per-intent O_EXCL prevented a duplicate reservation in all 150 races; this does not prove no race can produce one |
 
 ### Not established by Phase 2A / 2A-R
 
 | Property | Status | Reason |
 | --- | --- | --- |
-| Gateway ↔ executor OS isolation | BLOCKED | Needs dedicated OS accounts (creating users not approved). `docs/ISOLATION.md` A1 |
-| Protection against a compromised gateway | FAIL | Same uid as the executor, and holds the PDP signing key (A1) |
-| Budget and policy state across gateway restart | FAIL | PDP state in memory (A8); reproduced |
-| Trusted processes without root-equivalent privileges | NOT_TESTED | Operator uid has passwordless sudo (A2) |
+| Gateway ↔ executor OS isolation | PASS (manual, Phase 2B) | Separate accounts; permission matrix in `docs/ISOLATION.md` §0.2. Partly automated (P2A-02, P2A-13); conditional on the F5 override not being set |
+| Protection against a compromised gateway | PASS (manual) within its identity (Phase 2B) | It still can request in-policy payments and exhaust the budget |
+| Budget and policy state across gateway restart | PASS (Phase 2B-R3) | R3 tests |
+| Trusted processes without root-equivalent privileges | PASS for the services (Phase 2B); the operator still has passwordless sudo (B1) | Service accounts have no sudo |
 | Integrity of operator-run code from the checkout (tests, npm scripts, bootstrap seal) | NOT_TESTED | Outside the launch guarantee; runs as the operator (`docs/ISOLATION.md` §3a) |
 | Durability across loss or rebuild of the Codespace | NOT_TESTED | Journal on local disk (A9) |
+| Payment journal across a full teardown and redeployment | DESIGN_LIMITATION (found by R4 source review, not by an executed test) | The journal and ledger are inside the runtime root that `stop()` and the failed-startup cleanup delete (N2) |
 | Buy process / keychain under the executor identity | NOT_TESTED | No buy execution; `docs/ISOLATION.md` §7 |
 | Real Celo payment binding (payTo / network / asset with `@celo/buy`) | NOT_TESTED | No buy execution; `docs/ISOLATION.md` §7 |
 
 ## Phase 2A-R: deployment source integrity (`tests/isolation/source-integrity.test.ts`)
 
-Every attack is executed by a process running as `nobody` against a
+Every attack is executed by a process running as the agent identity
+(`nobody` in Phase 2A-R, `oxdeai-agent` since Phase 2B) against a
 disposable, world-writable copy of the working tree. The repository is never
 modified. Injected code would write a marker file if it ever ran as the
 operator. Design: `docs/ISOLATION.md` §3a.
@@ -236,6 +289,153 @@ modified):
 | M4: trusted entry imports the launcher before verifying | 2 failures: SI-02 for `executor.ts` and `launcher.ts` (planted code ran as the operator on import). The `*-main.ts` variants are not in the launcher's import graph, so they are not caught by this mutation, which is the expected scope |
 | M5: lockfile cross-check removed | 1 failure: SI-04 |
 
+## Phase 2B: trust-domain separation
+
+Four dedicated accounts, created in this disposable Codespace with the user's
+approval: `oxdeai-agent` 999, `oxdeai-gateway` 996, `oxdeai-auth` 995,
+`oxdeai-executor` 994. Each has no login shell, a locked password, no sudo,
+and only its own group; sudoers is unchanged. Layout and observed permission
+matrix: `docs/ISOLATION.md` §0.2.
+
+### P2B-01..20 (manual experiments: Phase 2B-R2 review, reproduced in the R4 audit)
+
+These were executed as scripted experiments during the Phase 2B-R2 review
+(real processes under the four accounts; attacker code run as
+`oxdeai-gateway`), and independently re-executed by the Phase 2B-R4 audit
+with its own scripts in a scratch environment. Neither set of scripts is
+committed. The status is therefore **PASS (manual)**; the "Automated
+coverage" column says what `npm test` checks on every run.
+
+Automated coverage meanings: **Yes**: an existing test asserts the same
+property under the four accounts. **Partial**: a test asserts part of it,
+or the same property for another identity. **No**: only the manual
+experiments.
+
+| ID | Control | Status | Automated coverage | Observed (R2; R4 where it adds) |
+| --- | --- | --- | --- | --- |
+| P2B-01 | Authorized mock payment executes once | PASS (manual) | Yes: P2A-01, SI-01 | ALLOW, 1 ledger entry, journal SETTLED |
+| P2B-02 | Gateway cannot read signing key | PASS (manual) | No (P2A-11 checks the agent only) | `EACCES` on `auth/config.json` as the gateway identity; R4 also: `EACCES` on auth's `/proc/<pid>/environ` and `mem` |
+| P2B-03 | Gateway cannot read wallet | PASS (manual) | No (P2A-11 checks the agent only) | `EACCES` on `mock-wallet.key`; R4 also on the executor config and ledger |
+| P2B-04 | Gateway cannot invoke payment directly | PASS (manual) | Partial: P2A-13 (token holder, as the gateway identity, without a valid authorization); P2A-12 (direct `pay` by the agent) | The adapter imported by gateway code fails `pay` with `MOCK_WALLET_UNAVAILABLE:EACCES`; a ledger append gives `EACCES` |
+| P2B-05 | No arbitrary signing | PASS (manual) | No | Other routes return 404; a pre-built ALLOW, field-injected requests, and wrapped decisions all give DENY `REQUEST_INVALID`; the decision log has only the legitimate ALLOWs |
+| P2B-06 | Out-of-policy denied | PASS (manual) | Partial: policy unit tests and the agent path through the gateway; not sent directly to the auth socket | Unlisted service, attacker recipient, other network → `ALLOWLIST_TARGET`; other asset → `ALLOWLIST_ASSET`; over the cap → `PER_ACTION_CAP_EXCEEDED`; http URL → `REQUEST_INVALID` |
+| P2B-07 | Gateway cannot modify policy state | PASS (manual) | Partial: every launch kernel-checks that the gateway cannot write the state root; reads are not tested | `EACCES` reading and writing `state.json` |
+| P2B-08 | Agent cannot reach auth socket | PASS (manual) | No (P2A-02 checks the executor socket only) | `EACCES`. Not unconditional: with the F5 override the agent can connect (B7) |
+| P2B-09 | Agent cannot reach executor socket | PASS (manual) | Yes: P2A-02 | `EACCES`. Not unconditional: see F5 |
+| P2B-10 | Auth cannot reach wallet | PASS (manual) | No | `EACCES` on the wallet, ledger, journal, and executor socket |
+| P2B-11 | Executor cannot reach signing key | PASS (manual) | No | `EACCES` on the signing key, policy state, and auth socket |
+| P2B-12 | Forged authorization rejected | PASS (manual) | Yes: P2A-03, P2A-05, P2A-13 (P2A-13 sends to the executor as the gateway identity with the token) | Foreign key → `AUTH_SIGNATURE_INVALID`; audience edited → `AUTH_AUDIENCE_MISMATCH,AUTH_SIGNATURE_INVALID`; expiry extended → `AUTH_SIGNATURE_INVALID` |
+| P2B-13 | Replay executes once | PASS (manual) | Yes: P2A-07, P2A-08 | `EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT`; R4 also: an authorization from an earlier deployment → `AUTH_KID_UNKNOWN` (not automated) |
+| P2B-14 | Modified binding rejected | PASS (manual) | Yes: P2A-06 | Recipient, network, asset, amount, URL, or body altered → `EXECUTOR_INTENT_HASH_MISMATCH`; 0 payments |
+| P2B-15 | Auth failure prevents payment | PASS (manual) | Partial: R3-F1c and R3-F4d (auth refuses to start → `PDP_UNAVAILABLE`, no payment); the crash-after-commit fault is not in a test | Crash after commit, before issue: agent DENY `PDP_UNAVAILABLE`, 0 payments, 0 journal entries (the budget is charged; see F3). R4: auth stopped → `PDP_UNAVAILABLE`, ledger unchanged |
+| P2B-16 | Executor crash: uncertain outcome | PASS (manual) | Yes: P2A-09, P2A-10 | INDETERMINATE, STARTED survives, no retry |
+| P2B-17 | Concurrent duplicates at most once | PASS (manual) | Yes: P2A-14 | 10 concurrent → 1 EXECUTED |
+| P2B-18 | Gateway cannot modify approved code | PASS (manual) | Partial: every launch kernel-checks that no identity can write any code copy, and fails closed; SI-05 checks the agent. No explicit write attempt as the gateway | `EACCES` on its own copy, the executor's copy, the approval, and the artifact |
+| P2B-19 | Gateway cannot touch journal or ledger | PASS (manual) | No (P2A-11 checks the agent only) | `EACCES` reading and writing; R4 also: unlinking the auth or executor socket → `EACCES` |
+| P2B-20 | Compromised gateway constrained by the PDP | PASS (manual) within its identity | Partial: P2A-13 | Cannot read keys, pay directly, change state or code, signal other services (`EPERM`), use sudo, or obtain an out-of-policy authorization. Can request in-policy payments and exhaust the budget (B3, F3) |
+
+Missing automated regression coverage (recommended, not implemented):
+1. A compromised-gateway test that runs `tests/isolation/agent-probe.ts` as
+   `oxdeai-gateway`. It would cover P2B-02, -03, -04, -07, -18, and -19 (read,
+   write, unlink, `/proc`), P2B-05 and -06 sent directly to the auth socket,
+   and P2B-20 (signals, sudo).
+2. A cross-account read test as `oxdeai-auth` and `oxdeai-executor`
+   (P2B-10, -11), and an agent connect test on the auth socket (P2B-08).
+3. Regression tests for the R4 findings once they are fixed: gid
+   distinctness (F5), an open lock descriptor without the lock (N1), a
+   journal that survives redeployment (N2), and a cross-deployment replay
+   test.
+
+### Phase 2B-R3: durable budget (`tests/isolation/policy-state.test.ts`, in `npm test`)
+
+| ID | Requirement | Status | Observed |
+| --- | --- | --- | --- |
+| R3-F1a | Init is explicit and once | PASS | Second init gives `POLICY_STATE_EXISTS`; state bytes unchanged |
+| R3-F1b | Restart and crash keep the budget | PASS | ALLOW, ALLOW, DENY; still DENY after a gateway restart, an auth restart, and SIGKILL + start; version 2 |
+| R3-F1c ×3 | Missing / corrupt / unreadable state fails closed | PASS | While running: DENY `POLICY_STATE_UNAVAILABLE:POLICY_STATE_<cause>`. On restart: auth exits 78 with `POLICY_STATE_MISSING`, `_CORRUPT`, or `_UNREADABLE:EACCES`; agent DENY `PDP_UNAVAILABLE`; no new ALLOW, no payment; missing state is not recreated |
+| R3-F2a | New deployment keeps the exhausted budget | PASS | New runtime root, same state dir; DENY `BUDGET_EXCEEDED`; version unchanged (not reset) |
+| R3-F2b | Other policy identity cannot reuse or reset | PASS | Uninitialized identity: `flock` exit 66 (no state directory), and nothing is created. Copied state: exit 78 `POLICY_STATE_BINDING_MISMATCH`. Original state bytes unchanged |
+| R3-F4a | Simultaneous starts: one writer | PASS | 2 contenders: 1 ready, 1 exit 75. A third (locked) exits 75; one without the lock exits 78 `POLICY_STATE_LOCK_NOT_HELD`. Winner SIGKILLed → a normal start succeeds immediately |
+| R3-F4b | Unlocked start refused even when idle | PASS | Exit 78 `POLICY_STATE_LOCK_NOT_HELD` |
+| R3-F4c | After a crash, still one writer | PASS | 3 contenders after SIGKILL: 1 ready, 2 exit 75 |
+| R3-F4d | Lock cannot be taken: fail closed | PASS | Lock file mode 000: `flock` exit 66; agent DENY `PDP_UNAVAILABLE`; no payment; works again after restoring |
+| R3-F4e | Concurrency across restarts within budget | PASS | 28 requests across an auth restart and a gateway restart against a 5-payment budget: exactly 5 ALLOW; the rest `BUDGET_EXCEEDED` or `POLICY_STATE_CONFLICT`; decision log shows 5 ALLOW |
+
+Budget properties, assessed separately:
+
+| Property | Status | Evidence |
+| --- | --- | --- |
+| Durable storage | PASS | R3-F1b, R3-F2a |
+| Atomic updates | PASS (design review; temp + fsync + rename + dir fsync) | A mid-write crash is not simulated |
+| Concurrent authorization safety | PASS for auth services started by the launcher | R3-F4e (launcher `flock` single writer + compare-and-set); R4 (manual): 20 parallel requests, 5-payment budget → exactly 5 ALLOW. Not established for a second auth process started outside the launcher's `flock` (N1) |
+| Crash recovery | PASS | R3-F1b, R3-F4a, R3-F4c |
+| No silent reset (missing state, new deployment, other identity) | PASS | R3-F1c, R3-F2a, R3-F2b; reproduced by R4 (manual) |
+| Rollback resistance (older valid `state.json` restored) | FAIL (manual, R4) | Restoring an earlier copy (version 3 → 2) restored consumed capacity; a new ALLOW was issued (N3). Operator-only action; outside the current threat model |
+| Settlement accounting (budget vs. settled payments) | NOT_TESTED / not implemented | The budget is reserved authorization capacity (F3) |
+
+Mutation tests (manual, disposable copies; the repository was not
+modified):
+
+| Mutation | Result |
+| --- | --- |
+| MF1: state store recreates a fresh budget when `state.json` is missing | R3-F1c (missing) fails |
+| MF2: policy binding not checked | R3-F2b fails |
+| MF4: writer lock not required | R3-F4a and R3-F4b fail (the unlocked contender started) |
+
+The R4 audit rebuilt the three mutants independently (disposable copies
+outside the repository) with the same results. MF1 failed only R3-F1c
+(missing). MF2 failed only R3-F2b. MF4 failed R3-F4a and R3-F4b, then hung
+on the unlocked contender until a timeout.
+
+R3-F4b covers an instance with *no* descriptor on the lock. No test covers
+an instance that holds an open but unlocked descriptor while another
+instance holds the lock (N1).
+
+### Phase 2B review findings
+
+| # | Severity | Finding | Status |
+| --- | --- | --- | --- |
+| F1 | MEDIUM | Missing state after restart reset the budget | **PASS** (fixed in 2B-R3: no auto-init; explicit init once) |
+| F2 | MEDIUM | New deployments reset the budget | **PASS** (fixed in 2B-R3: persistent, binding-checked state root) |
+| F3 | LOW | Budget charged at decision commit, even if the authorization is never delivered or used | Open, documented. Conservative: authorizations never exceed the budget, but the budget is not settled spend. R4 (manual): the gateway identity used up a 30,000 budget with 3 ALLOWs and 0 ledger entries (availability limitation). No automatic refunds. Settlement reconciliation required before real payments |
+| F4 | LOW | Stale-lock takeover could allow two auth writers | **PASS for auth services started by the launcher** (fixed in 2B-R3: kernel `flock`, no check-then-delete; R3-F4a..F4e). The startup self-check does not prove ownership for processes started any other way (N1) |
+| F5 | LOW | `OXDEAI_AGENT_UID` / `OXDEAI_AGENT_GID` override in deployed `identity.ts`; distinctness check compares uids, not gids | Open. R4 (manual): with the agent in the gateway's group, the launch was accepted and the agent reached the auth and executor sockets. No unauthorized mock payment (token and policy held). Operator-controlled environment; not a gateway-only bypass. Remove, restrict to tests, or harden before real payments |
+| F6 | INFO | Docs and evidence described Phase 2A-R | Fixed |
+| B6 | LOW | Executor journal still uses the Phase 2A pid-based stale-lock takeover | Open. R4 (manual): two writers in 11 of 150 mock races; 0 duplicate reservations (O_EXCL). Not a proof that no race can duplicate. Robust exclusive lock required before real payments |
+| N1 | LOW | `assertWriterLockHeld` does not prove lock ownership: a process with an open but unlocked descriptor passes while another instance holds the lock | Documentation corrected (2B-R5); technical issue open. R4 (manual): a second auth service started this way, became a second writer, and took over the auth socket. Needs code execution as `oxdeai-auth`. Hardening required before real payments |
+| N2 | LOW | Payment journal and mock ledger are deleted with the runtime root at teardown; unresolved records do not survive redeployment | Documentation corrected (2B-R5); technical issue open. Persistent journal and durable reconciliation required before real payments |
+| N3 | LOW | Policy state is not rollback-resistant | Documentation corrected (2B-R5); technical issue open. R4 (manual): restoring an older `state.json` restored consumed capacity. Operator-only. Rollback-resistant accounting required before real payments |
+| N4 | INFO | Stale text: ISOLATION A2 ("root-equivalent"), `demo-isolated.ts` header ("three processes, two OS identities"), other Phase 2A wording presented as current | Fixed (2B-R5) |
+
+### Phase 2B-R4 independent audit (summary)
+
+A read-only independent audit of the uncommitted Phase 2B / 2B-R3 working
+tree on HEAD `e7c43c2` (2026-10-27). Its scripts and raw output were kept in
+a scratch location and are **not** committed. The observations below are
+attributed to that audit; they cannot be re-run from this repository as
+is.
+
+- **Baseline:** the four accounts, sudoers, and the protected user files
+  were unchanged. The full suite gave 131 / 131 PASS, with the same test
+  names as `evidence/test-results.tap`. `npm run demo` was byte-identical to
+  `evidence/demo-output.json`. `demo:isolated` gave BLOCKED (exit 2) without
+  approval, BLOCKED without policy state, and success with both, from
+  artifact digest `7d7d0bf4…`, the digest in
+  `evidence/demo-isolated-output.json`.
+- **P2B-01..20:** all PASS (manual) in the tested mock environment (table
+  above).
+- **F1, F2, F4:** reproduced (missing, corrupt, and unreadable state;
+  re-init; redeployment; foreign binding; parallel requests within budget;
+  second `flock` instance exits 75). Mutants MF1, MF2, MF4 detected.
+- **Confirmed open findings:** F3 (budget exhaustion without payment), F5
+  (gid override reaches the auth and executor sockets), B6 (two journal
+  writers in 11 of 150 races; 0 duplicate reservations).
+- **New findings:** N1 (lock ownership not proven), N2 (journal deleted at
+  teardown), N3 (state rollback restores capacity), N4 (stale
+  documentation).
+- **Verdict:** CONDITIONAL GO, mock only, conditional on the documentation
+  corrections made in Phase 2B-R5. Real-payment readiness: NO.
+
 ## AGENTS.md validation list
 
 | Requirement | Status | Evidence |
@@ -247,14 +447,17 @@ modified):
 | Replay attempt | PASS | #6 |
 | Modified payment parameters | PASS | #4 |
 | Invalid signature | PASS | #7 |
-| Missing policy state | PASS | #8 |
-| Attempted direct payment bypass | **By the agent:** PASS. Token rejection (#9a, #9b). The OS blocks the agent identity from the executor socket, wallet, ledger, journal, configs, and trusted code of a running deployment (#9d: P2A-02, -11, -12) and from later launches (#9e: SI-01..07). **By a token holder without a valid authorization:** PASS, refused (P2A-13). **By a compromised gateway:** FAIL. **Single-process harness:** DESIGN_LIMITATION (#9c). | #9, Phase 2A, 2A-R |
+| Missing policy state | PASS | #8; persistent state in the four-account deployment: R3-F1c (missing, corrupt, or unreadable state refuses startup; never re-initialized) |
+| Attempted direct payment bypass | **By the agent:** PASS. Token rejection (#9a, #9b). The OS blocks the agent identity from the executor socket, wallet, ledger, journal, configs, and trusted code of a running deployment (#9d: P2A-02, -11, -12) and from later launches (#9e: SI-01..07). **By a token holder without a valid authorization:** PASS, refused (P2A-13). **By a compromised gateway:** PASS (manual) within its identity's privileges (Phase 2B; P2B-02..05, -20; R2 review, reproduced by R4; not automated); it can still request in-policy payments. **Single-process harness:** DESIGN_LIMITATION (#9c). | #9, Phase 2A, 2A-R |
 | Authorization failure before any payment signing | PASS | #10, `R-F1a` |
 | Payment-time recipient / network / asset / price binding (mock adapter) | PASS | `R-F1a`, `R-F1b` |
 | Ambiguous payment outcome never reported as DENY | PASS | `R-F2a`-`R-F2h`, `R-F1c` |
 | Empty or malformed required allowlists fail closed | PASS | `R-F3` |
 | Executor independently verifies the signed authorization | PASS | `P2A-04`, `P2A-05`, `P2A-06`, `P2A-13` |
 | Durable payment journal: restart, crash recovery, duplicate rejection, no auto-retry | PASS (mock, local disk) | `P2A-08`, `P2A-09`, `P2A-14`, `J1`-`J9b` |
+| Gateway holds no signing key or payment credential; signer has no generic signing endpoint | PASS (manual: R2 review experiments, reproduced by the R4 audit; not automated) | P2B-02..05, P2B-20 |
+| Durable budget: no reset on restart, missing state, or redeployment; single writer | PASS (single writer for auth services started by the launcher) | R3-F1a..R3-F4e. Open: N1 (startup check does not prove lock ownership), N3 (no rollback resistance) |
+| Budget reconciled with settled payments | NOT_TESTED | F3 |
 
 ## Negative controls for Phase 1 defences (manually executed, not in the suite)
 
@@ -272,12 +475,12 @@ row; `T10`, which includes a tampered-body case, also fails.)
 
 | Property | Status | Reason |
 | --- | --- | --- |
-| Agent cannot reach executor / adapter / keys at process or OS level | PASS in Phase 2A (#9d); DESIGN_LIMITATION in the single-process harness | Gateway ↔ executor separation NOT_TESTED (same uid) |
+| Agent cannot reach executor / adapter / keys at process or OS level | PASS in Phase 2A (#9d); DESIGN_LIMITATION in the single-process harness | Gateway ↔ executor separation: NOT_TESTED in Phase 2A (same uid); since Phase 2B separate accounts (P2B rows, manual) |
 | Real `@celo/buy` quote / pay behavior | NOT_TESTED | Adapter is an interface stub (`NOT_IMPLEMENTED`) |
 | `buy_curl` / `buy curl --max-amount` refuses before signing when price > cap | NOT_TESTED | No live buy process |
 | A `@celo/buy` adapter can refuse a different `payTo`, network, or asset before signing | NOT_TESTED | `buy_curl` takes no recipient/network/asset (FEASIBILITY.md §2); payment-time binding is proven for the mock only |
 | Which `@celo/buy` errors guarantee "nothing signed" (`PaymentRefusedError` mapping) | NOT_TESTED | No live buy process; until verified, every buy `pay` error must map to PAYMENT_UNKNOWN |
-| Payment journal durability / reconciliation of INDETERMINATE outcomes | PASS (mock, local disk) | `J1`-`J9b`, `P2A-08`, `P2A-09`; reconciliation remains a manual operator step (`docs/ISOLATION.md` §6) |
+| Payment journal durability / reconciliation of INDETERMINATE outcomes | PASS within one deployment (mock, local disk); DESIGN_LIMITATION across a full teardown (N2) | `J1`-`J9b`, `P2A-08`, `P2A-09`; reconciliation remains a manual operator step (`docs/ISOLATION.md` §6) and must happen before teardown |
 | `PurchaseRequest` binds the HTTP request headers that buy forwards | NOT_TESTED | Headers are not part of the binding (`docs/ISOLATION.md` §7) |
 | Real x402 402-challenge parsing | NOT_TESTED | Mock quote format is this PoC's own |
 | Celo settlement | NOT_TESTED | No chain interaction by design |

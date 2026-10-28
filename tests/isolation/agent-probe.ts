@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 /**
- * Untrusted agent program (Process A) for the isolation tests.
+ * Untrusted program for the isolation tests.
  *
- * Launched by the tests as the agent OS identity. Each command performs one
+ * Launched by the tests as the agent OS identity, or as a service identity
+ * to act as a compromised gateway / auth service / executor. Each command performs one
  * honest or adversarial action and prints one JSON line with what the OS and
  * the gateway answered. It never receives operator secrets except where a
  * test hands it an already-signed authorization to submit.
@@ -11,12 +12,13 @@
  */
 import { spawnSync } from "node:child_process";
 import { generateKeyPairSync, randomBytes } from "node:crypto";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { signAuthorizationEd25519, type AuthorizationV1 } from "@oxdeai/core";
 import { createPurchaseAgent } from "../../src/agent/agent.ts";
 import type { PurchaseRequest } from "../../src/agent/purchase-request.ts";
 import { createRemoteGatewayClient } from "../../src/agent/remote-client.ts";
+import { postJson } from "../../src/isolation/ipc.ts";
 import { SERVICES } from "../../src/system.ts";
 
 type Service = (typeof SERVICES)[keyof typeof SERVICES];
@@ -200,6 +202,25 @@ switch (command) {
         },
       ]),
     );
+    break;
+  }
+
+  case "post": {
+    // Raw IPC request. A header value "@token-from:<config>" is replaced by the
+    // internalToken in that config file, read with this process's own identity.
+    const [sock, path, body, headers] = args;
+    const h = Object.fromEntries(
+      Object.entries(JSON.parse(headers ?? "{}") as Record<string, string>).map(([k, v]) => [
+        k,
+        v.startsWith("@token-from:") ? (JSON.parse(readFileSync(v.slice(12), "utf8")) as { internalToken: string }).internalToken : v,
+      ]),
+    );
+    out = await attemptAsync(() => postJson(sock!, path!, JSON.parse(body!), h));
+    break;
+  }
+
+  case "unlink": {
+    out = Object.fromEntries(args.map((p) => [p, attempt(() => unlinkSync(p))]));
     break;
   }
 

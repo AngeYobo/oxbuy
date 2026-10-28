@@ -260,9 +260,12 @@ export type FilePaymentJournal = PaymentJournal & {
 };
 
 /**
- * Open the journal for writing. Takes the single-writer lock: fails with
+ * Open the journal for writing. Takes the writer lock: fails with
  * JOURNAL_LOCKED if another live process holds it, and takes over a lock left
- * by a dead process (crash recovery).
+ * by a dead process (crash recovery). The takeover is check-then-delete, so
+ * two processes racing on the same stale lock can both become writers
+ * (observed in the Phase 2B-R4 audit; docs/ISOLATION.md B6). Per-intent
+ * exclusivity then rests on the O_EXCL creation in `reserve`.
  */
 export function openFilePaymentJournal(dir: string, opts: { now?: () => number } = {}): FilePaymentJournal {
   const now = opts.now ?? (() => Math.floor(Date.now() / 1000));

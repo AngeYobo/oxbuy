@@ -2,18 +2,27 @@
 /**
  * P2A-01..14: adversarial tests against independently launched processes.
  *
- *   Process A  agent     tests/isolation/agent-probe.ts, as the agent OS identity (nobody)
- *   Process B  gateway   src/isolation/gateway-main.ts, as the operator identity
- *   Process C  executor  src/isolation/executor-main.ts, as the operator identity
+ *   agent     tests/isolation/agent-probe.ts, as oxdeai-agent
+ *   gateway   src/isolation/gateway-main.ts,  as oxdeai-gateway
+ *   auth      src/isolation/auth-main.ts,     as oxdeai-auth (PDP + signer)
+ *   executor  src/isolation/executor-main.ts, as oxdeai-executor
  *
  * Every "denied by the OS" assertion is an errno returned by the kernel to a
  * process running as the agent identity, next to a positive control showing
- * the same resource works for its intended user. If the agent identity
- * cannot be assumed here, every test is skipped as BLOCKED, never passed.
+ * the same resource works for its intended user. If the identities cannot be
+ * assumed here, every test is skipped as BLOCKED, never passed.
+ *
+ * Phase 2B-R1 adaptation: the gateway and executor no longer run as the
+ * operator, so the operator can no longer open executor-owned files or
+ * sockets directly. Positive controls and inspections therefore go through
+ * the legitimate owner: requests to the executor are made as the gateway
+ * identity (`executorPost`), journal reads and reconciliation run as the
+ * executor identity, and operator inspection of private files uses sudo
+ * (`sys.privileged`). The security assertions themselves are unchanged.
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { INTERNAL_EXECUTOR_TOKEN_HEADER } from "@oxdeai/guard";
@@ -21,14 +30,15 @@ import { signAuthorizationEd25519, type AuthorizationV1 } from "@oxdeai/core";
 import type { PurchaseResult } from "../../src/agent/agent.ts";
 import type { IntentRef, PurchaseRequest } from "../../src/agent/purchase-request.ts";
 import { AGENT_UID, agentIdentityUnavailableReason } from "../../src/isolation/identity.ts";
-import type { IsolatedSystem, LaunchOptions } from "../../src/isolation/launcher.ts";
+import type { IsolatedSystem } from "../../src/isolation/launcher.ts";
 import { SERVICES } from "../../src/system.ts";
-import { REPO_ROOT, trustedArtifact } from "./trusted-artifact.ts";
+import { REPO_ROOT, trustedArtifact, type TestLaunchOptions } from "./trusted-artifact.ts";
 
 const PROBE = join(REPO_ROOT, "tests", "isolation", "agent-probe.ts");
 const BLOCKED = agentIdentityUnavailableReason();
 const opts = BLOCKED === null ? {} : { skip: `BLOCKED: ${BLOCKED}` };
 const BUDGET = "1000000000";
+const NODE = realpathSync(process.execPath);
 
 type Authorized = { request: PurchaseRequest; intent_ref: IntentRef; authorization: AuthorizationV1 };
 
@@ -77,7 +87,8 @@ function procUid(pid: number): number {
 
 // Every system is launched from a sealed, approved artifact (docs/ISOLATION.md §3).
 let trusted: Awaited<ReturnType<typeof trustedArtifact>>;
-const launchIsolatedSystem = (opts: LaunchOptions = {}) => trusted.launch(opts);
+// Without an explicit state root, each launch gets a fresh, explicitly initialized policy state.
+const launchIsolatedSystem = (opts: TestLaunchOptions = {}) => trusted.launch(opts);
 
 let sys: IsolatedSystem;
 before(async () => {
@@ -118,19 +129,22 @@ test("P2A-02 agent identity cannot connect to the executor socket (EACCES); publ
   assert.deepEqual(res[sys.paths.executorSocket], { ok: false, code: "EACCES" });
   assert.deepEqual(res[sys.paths.publicSocket], { ok: true }, "positive control: the agent's one door is open");
 
-  // Positive control: the trusted identity can reach the executor (403 without the token).
+  // Positive control: the executor's legitimate client (the gateway identity)
+  // can reach it (403 without the token).
   const op = await sys.executorPost("/v1/execute", {}, {});
   assert.equal(op.status, 403);
 
-  assert.equal(statSync(sys.paths.executorDir).mode & 0o777, 0o700);
-  assert.equal(statSync(sys.paths.executorSocket).mode & 0o777, 0o600);
+  // 2B layout: the socket sits in a setgid directory only the gateway group can enter.
+  assert.deepEqual(sys.privileged.stat(sys.paths.execIpcDir), { mode: 0o2750, user: "oxdeai-executor", group: "oxdeai-gateway" });
+  assert.deepEqual(sys.privileged.stat(sys.paths.executorSocket), { mode: 0o660, user: "oxdeai-executor", group: "oxdeai-gateway" });
+  assert.equal(sys.privileged.stat(sys.paths.executorDir).mode, 0o700);
 
-  // No TCP or UDP listener belongs to the executor.
+  // No TCP or UDP listener belongs to the executor (sudo: its pid belongs to another uid).
   const { executor } = sys.pids();
-  const ss = spawnSync("ss", ["-H", "-ltunp"], { encoding: "utf8" });
+  const ss = spawnSync("sudo", ["-n", "ss", "-H", "-ltunp"], { encoding: "utf8" });
   assert.equal(ss.status, 0, ss.stderr);
   assert.ok(!ss.stdout.includes(`pid=${executor},`), `executor has an inet listener:\n${ss.stdout}`);
-  const unix = spawnSync("ss", ["-H", "-lxp"], { encoding: "utf8" }).stdout;
+  const unix = spawnSync("sudo", ["-n", "ss", "-H", "-lxp"], { encoding: "utf8" }).stdout;
   assert.ok(unix.includes(sys.paths.executorSocket) && unix.includes(`pid=${executor},`), "executor listens on its Unix socket only");
 });
 
@@ -264,7 +278,7 @@ for (const [fault, paid] of [
 
       await s.startExecutor();
       assert.deepEqual(s.journal().get(h), { state: "STARTED" }, "restart does not convert STARTED to a definitive outcome");
-      const log = readFileSync(join(s.paths.journalDir, "journal.log"), "utf8");
+      const log = s.privileged.read(join(s.paths.journalDir, "journal.log")).toString("utf8");
       assert.match(log, new RegExp(`"needs_reconciliation":\\["${h}"\\]`));
 
       // Resubmission after a gateway restart: still unknown, never paid again.
@@ -275,13 +289,14 @@ for (const [fault, paid] of [
       assert.equal(s.ledger().length, paid);
 
       // Operator reconciliation: needs the executor stopped (single-writer lock).
+      // Run as the executor identity, which owns the journal.
       const cli = join(s.paths.app, "src", "isolation", "journal-cli.ts");
       const verdict = paid ? "SETTLED" : "NOT_SETTLED";
-      const locked = spawnSync(process.execPath, [cli, s.paths.journalDir, "resolve", h, verdict, "ledger checked"], { encoding: "utf8" });
+      const locked = s.runAsSync("executor", [NODE, cli, s.paths.journalDir, "resolve", h, verdict, "ledger checked"]);
       assert.notEqual(locked.status, 0);
       assert.match(locked.stderr, /JOURNAL_LOCKED/);
       await s.stopExecutor();
-      const ok = spawnSync(process.execPath, [cli, s.paths.journalDir, "resolve", h, verdict, "ledger checked"], { encoding: "utf8" });
+      const ok = s.runAsSync("executor", [NODE, cli, s.paths.journalDir, "resolve", h, verdict, "ledger checked"]);
       assert.equal(ok.status, 0, ok.stderr);
       const rec = s.journal().inspect(h)!;
       assert.equal(rec.state, "STARTED", "state is history; the verdict is attached, not substituted");
@@ -319,7 +334,7 @@ for (const [fault, startedAtTimeout] of [
 // ── P2A-11 ────────────────────────────────────────────────────────────────
 
 test("P2A-11 agent identity cannot read the journal, ledger, wallet key, or any config (EACCES)", opts, async () => {
-  const journalFiles = readdirSync(join(sys.paths.journalDir, "intents")).map((n) => join(sys.paths.journalDir, "intents", n));
+  const journalFiles = sys.privileged.list(join(sys.paths.journalDir, "intents")).map((n) => join(sys.paths.journalDir, "intents", n));
   assert.ok(journalFiles.length > 0, "there are journal records to steal");
   const targets = [
     join(sys.paths.journalDir, "journal.log"),
@@ -328,25 +343,29 @@ test("P2A-11 agent identity cannot read the journal, ledger, wallet key, or any 
     sys.paths.walletKeyPath,
     sys.paths.executorConfig,
     sys.paths.gatewayConfig,
+    sys.paths.authConfig,
   ];
-  const res = await agent(sys, "read", ...targets, join(REPO_ROOT, "package.json"), join(sys.paths.app, "package.json"));
+  const codeCopies = Object.values(sys.paths.apps).map((a) => join(a, "package.json"));
+  const res = await agent(sys, "read", ...targets, join(REPO_ROOT, "package.json"), ...codeCopies);
   for (const t of targets) {
     assert.deepEqual(res[t], { ok: false, code: "EACCES" }, t);
-    readFileSync(t); // positive control: the trusted identity can read it
+    sys.privileged.read(t); // positive control: the file exists and is readable by its owner (inspected via sudo)
   }
   assert.equal(res[join(REPO_ROOT, "package.json")].ok, true, "positive control: the agent can read public files");
-  assert.deepEqual(res[join(sys.paths.app, "package.json")], { ok: false, code: "EACCES" }, "trusted artifact is not even readable");
-  for (const t of targets) assert.equal(statSync(t).mode & 0o077, 0, `${t} is private to its owner`);
+  // 2B: each service has its own code copy; none is readable by the agent.
+  for (const c of codeCopies) assert.deepEqual(res[c], { ok: false, code: "EACCES" }, `trusted artifact copy is not even readable: ${c}`);
+  for (const t of targets) assert.equal(sys.privileged.stat(t).mode & 0o077, 0, `${t} is private to its owner`);
 });
 
 // ── P2A-12 ────────────────────────────────────────────────────────────────
 
 test("P2A-12 agent imports the trusted payment runtime and pays directly: blocked by the OS", opts, async () => {
-  const before = readFileSync(sys.paths.ledgerPath, "utf8");
+  const ledgerBytes = () => sys.privileged.read(sys.paths.ledgerPath).toString("utf8");
+  const before = ledgerBytes();
   const res = await agent(sys, "direct-pay", REPO_ROOT, sys.paths.walletKeyPath, sys.paths.ledgerPath, "a".repeat(64));
   assert.deepEqual(res.pay, { ok: false, code: "MOCK_WALLET_UNAVAILABLE:EACCES" });
   assert.deepEqual(res.forgeLedger, { ok: false, code: "EACCES" });
-  assert.equal(readFileSync(sys.paths.ledgerPath, "utf8"), before, "ledger unchanged");
+  assert.equal(ledgerBytes(), before, "ledger unchanged");
 
   // It also cannot alter the trusted code, signal, or inspect the trusted processes.
   const { executor, gateway } = sys.pids();
@@ -424,11 +443,8 @@ test("P2A-14 concurrent duplicate requests: at most one payment (via gateway and
   assert.equal(sys.ledger().length, before + 2);
   assert.equal(sys.ledger().filter((e) => e.intent_hash === a.authorization.intent_hash).length, 1);
 
-  // A second executor process cannot open the same journal (single writer).
-  const second = spawnSync(process.execPath, [join(sys.paths.app, "src", "isolation", "executor-main.ts"), sys.paths.executorConfig], {
-    encoding: "utf8",
-    timeout: 10_000,
-  });
+  // A second executor process (same executor identity) cannot open the same journal (single writer).
+  const second = sys.runAsSync("executor", [NODE, join(sys.paths.app, "src", "isolation", "executor-main.ts"), sys.paths.executorConfig], 10_000);
   assert.notEqual(second.status, 0);
   assert.match(second.stderr, /JOURNAL_LOCKED/);
 });
@@ -438,8 +454,11 @@ test("P2A-14 concurrent duplicate requests: at most one payment (via gateway and
 test("P2A secrets never appear in trusted-process logs or in responses to the agent", opts, async () => {
   const out = await agent(sys, "buy", sys.paths.publicSocket, "weather");
   const text = JSON.stringify(out);
-  const logs = readdirSync(sys.paths.logsDir).map((n) => readFileSync(join(sys.paths.logsDir, n), "utf8")).join("\n");
-  const walletKey = readFileSync(sys.paths.walletKeyPath).toString("hex");
+  const logs = readdirSync(sys.paths.logsDir, { withFileTypes: true })
+    .filter((e) => e.isFile()) // logs/ also holds the launcher's private staging/ directory
+    .map((e) => readFileSync(join(sys.paths.logsDir, e.name), "utf8"))
+    .join("\n");
+  const walletKey = sys.privileged.read(sys.paths.walletKeyPath).toString("hex");
   for (const secret of [sys.operatorSecrets.internalToken, walletKey, "PRIVATE KEY"]) {
     assert.ok(!text.includes(secret), "agent-visible response leaks a secret");
     assert.ok(!logs.includes(secret), "process log leaks a secret");

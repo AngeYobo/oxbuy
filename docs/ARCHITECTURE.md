@@ -1,10 +1,10 @@
-# Architecture: OxDeAI x402 Gateway, Phase 1 / 1R / 2A
+# Architecture: OxDeAI x402 Gateway, Phase 1 / 1R / 2A / 2B
 
 Phase 1 is a local, single-process prototype. It uses the published OxDeAI
 packages unmodified and a deterministic mock of the `@celo/buy` quote/pay
 flow. There is no wallet, no network access, and no chain interaction.
 
-Phase 2A runs the same components as three processes (agent, gateway,
+Phase 2A (historical) ran the same components as three processes (agent, gateway,
 executor) with the agent under a separate OS identity, a durable payment
 journal, and executor-side verification of the signed authorization. Phase
 2A-R makes trusted code launch only from a sealed, operator-approved
@@ -12,17 +12,40 @@ artifact verified before import (`src/isolation/artifact.ts`,
 `src/isolation/trusted-entry.ts`). The process layout, IPC, access control,
 trust store, journal, and recovery procedure are in `docs/ISOLATION.md`.
 
-The agent is isolated from the trusted side; the trusted components are not
-isolated from each other:
-- The gateway and executor share one OS identity, which has passwordless
-  sudo in this Codespace.
-- The gateway holds the PDP authorization signing key.
-- The gateway can read the mock wallet and call the payment adapter
-  directly.
+Phase 2B (current) separates four security domains under dedicated OS
+accounts (`docs/ISOLATION.md` §0):
+- **agent** (`oxdeai-agent`): untrusted;
+- **gateway** (`oxdeai-gateway`): the PEP; it holds no signing key, no
+  wallet, and no policy state;
+- **auth service** (`oxdeai-auth`): the PDP and signer; it holds the
+  signing key and the persistent policy state, but no wallet;
+- **executor** (`oxdeai-executor`): holds the wallet, ledger, and journal,
+  but no signing key.
 
-The executor's own signature check therefore does not constrain a
-compromised gateway. No protection against a compromised gateway is
-claimed. The single-process composition (`src/system.ts`)
+The auth service exposes only `/v1/authorize`. It builds and signs every
+authorization itself, and there is no generic signing endpoint. In the
+Phase 2B-R2 review, code running as the gateway identity could not read the
+signing key or wallet, pay directly, change policy state or code, or obtain
+an authorization outside policy (CONFORMANCE.md, P2B-01..20). The
+independent Phase 2B-R4 audit reproduced these results. Both were manual
+experiments; only some of the twenty controls have automated tests in
+`npm test` (CONFORMANCE.md lists which). These results hold for the
+standard launch; the `OXDEAI_AGENT_UID` / `OXDEAI_AGENT_GID` override
+weakens the agent/gateway boundary (limitation 16).
+
+**Not claimed:**
+- that a compromised gateway cannot cause payments. It can request any
+  payment the policy allows.
+- any protection against the operator, who has passwordless sudo, or
+  against root. This includes the operator's launch environment (F5),
+  restoring older policy state (N3), and starting services outside the
+  launcher (N1).
+- that the budget equals settled spending. It counts authorizations at
+  decision commit (F3).
+- that uncertain payment records survive a full redeployment (N2).
+- readiness for real payments.
+
+The single-process composition (`src/system.ts`)
 remains the harness for the protocol tests; the executor, gateway, and PDP
 code are the same in both.
 
@@ -201,6 +224,10 @@ commits no state.
 | Agent ↔ executor / adapter | agent receives a frozen object with `quote`, `authorize`, `purchase` only | Same as above. |
 | Gateway ↔ executor | random 32-byte token in a header, checked by `protectUpstreamExecution`, plus executor-side verification of the signed authorization | Tested: missing, forged, and duplicated headers are rejected; a valid token with a missing, forged, expired, future, foreign, or mismatched authorization is refused (P2A-13). |
 | Agent ↔ executor, keys, wallet, journal (Phase 2A) | separate OS identity for the agent; Unix sockets and files protected by permissions | Tested with kernel errnos from the agent identity (P2A-02, -11, -12). Gateway and executor share one identity. See `docs/ISOLATION.md`. |
+| Gateway ↔ signing key, wallet, policy state, journal, ledger (Phase 2B) | separate OS accounts; each secret in a 0700 directory of its owner | Checked by kernel errnos as the gateway identity in manual experiments (R2 review, reproduced in the R4 audit: P2B-02, -03, -07, -19, -20). Not in `npm test`, except that every launch kernel-checks that no service can write the code copies or the policy state root. |
+| Gateway ↔ signer (Phase 2B) | auth service accepts only an exact `PurchaseRequest` on `/v1/authorize` and evaluates policy itself | Manual experiments (R2, R4): no other route; pre-built or field-injected authorizations refused; out-of-policy requests denied (P2B-05, -06). |
+| Auth ↔ wallet; executor ↔ signing key (Phase 2B) | separate OS accounts | Manual experiments by kernel errnos (R2, R4: P2B-10, -11). |
+| Budget ↔ restarts, redeployments, concurrent writers (Phase 2B-R3) | persistent, operator-initialized, binding-checked state; kernel `flock` single writer for services started by the launcher | Tested with real processes (R3-F1a..F4e). Single writer not enforced for an auth process started outside the launcher's `flock` (N1); no rollback resistance (N3). |
 | Authorization artifact | Ed25519 signature, audience, expiry, authority pair | Tested: tamper, forged key, wrong audience, expiry. |
 | Request ↔ authorization | `intent_hash` recomputed from the presented request | Tested for every bound field. |
 | Hashed object ↔ executed object | JSON round-trip + deep freeze before verification | Tested with caller mutation after submit. |
@@ -217,10 +244,10 @@ These are stated as limits of Phase 1, not as solved properties.
    different OS identity and is denied the executor socket, wallet key,
    ledger, journal, configs, and trusted code by the kernel (P2A-02, -11,
    -12). Its changes to the working tree cannot reach a later launch
-   (SI-01..07). Gateway and executor still share one OS identity, which has
-   sudo, and the gateway holds the signing key and can reach the mock wallet
-   (`docs/ISOLATION.md` §4, A1-A2). With real `@celo/buy`, the buy process
-   and keychain must run under the executor's identity (NOT_TESTED).
+   (SI-01..07). Since Phase 2B the gateway, auth service, and executor each
+   run as their own account. The operator still has sudo (`docs/ISOLATION.md`
+   §0.7). With real `@celo/buy`, the buy process and keychain must run under
+   the executor's identity (NOT_TESTED).
 2. **Agent is not authenticated.** `agent_id` is fixed by deployment
    configuration, not established from an authenticated caller.
    `createSecureGuard` / `TrustedExecutionContext` are not used: they apply to
@@ -229,9 +256,13 @@ These are stated as limits of Phase 1, not as solved properties.
 3. **Gateway replay store is in-memory.** It is lost on gateway restart and
    not shared across instances. Since Phase 2A the executor also consumes
    `auth_id` durably, so a resubmission after a gateway restart is refused
-   by the executor and not paid (P2A-08). The PDP's policy state (budget)
-   is also in-memory and resets on gateway restart: new intents are
-   authorized against a fresh budget (reproduced: 2× the budget spent).
+   by the executor and not paid (P2A-08). Policy state (budget) is no longer
+   held by the gateway. Since Phase 2B-R3 it is persistent, operator-
+   initialized, bound to the policy identity, written under a kernel lock
+   taken by the launcher (single writer only for services started that way;
+   N1), and never recreated automatically. It survives restarts and
+   redeployments (`docs/ISOLATION.md` §0.4). It is not rollback-resistant:
+   restoring an older `state.json` restores consumed capacity (N3).
 4. **Authorization is spent before payment.** `auth_id` is consumed before
    the executor runs. If the executor then refuses (price or payee changed),
    the authorization is spent and the budget reserved at authorization time
@@ -267,15 +298,35 @@ These are stated as limits of Phase 1, not as solved properties.
     signed. Which `@celo/buy` errors guarantee "not signed" is not verified;
     until it is, a buy adapter should map every `pay` error to unknown.
 14. **Payment journal.** The executor process uses the durable file journal
-    (`docs/ISOLATION.md` §5): survives executor restarts and crashes
-    (P2A-08, P2A-09), single writer, never auto-resolves STARTED. The
-    in-process harness uses an in-memory journal with the same interface.
-    Durability is bounded by the local disk; reconciliation is a manual
-    operator step (`docs/ISOLATION.md` §6).
+    (`docs/ISOLATION.md` §5): survives executor and gateway restarts and
+    crashes within one deployment (P2A-08, P2A-09), never auto-resolves
+    STARTED. It is deleted with the runtime root when the deployment is torn
+    down, so unresolved records do not survive redeployment (N2). Its
+    pid-based stale-lock takeover can admit two writers (B6); per-intent
+    O_EXCL creation still prevented duplicate reservations in the R4
+    experiments. The in-process harness uses an in-memory journal with the
+    same interface. Durability is bounded by the local disk; reconciliation
+    is a manual operator step (`docs/ISOLATION.md` §6). A persistent journal,
+    a robust exclusive lock, and durable settlement reconciliation are
+    required before real payments.
 15. **Executor token is no longer the executor's only credential.** Since
     Phase 2A the executor verifies the signed authorization and its
     `intent_hash` binding itself (P2A-13). This stops a token holder
-    without a valid authorization. It does not stop a compromised gateway:
-    the gateway holds the PDP signing key, so it can produce valid
-    authorizations, and it shares the executor's OS identity, so it can
-    read the wallet directly (`docs/ISOLATION.md` A1).
+    without a valid authorization. Since Phase 2B the gateway no longer
+    holds the signing key and no longer shares the executor's identity, so a
+    compromised gateway cannot produce valid authorizations or read the
+    wallet (P2B-02..05, P2B-20). It can still request in-policy ones.
+16. **Agent identity override (F5).** `OXDEAI_AGENT_UID` /
+    `OXDEAI_AGENT_GID` are honored by the deployed launcher. Its
+    distinctness check compares uids, not gids. In the R4 audit, an agent
+    placed in the gateway's group reached the auth and executor sockets;
+    the executor token and the policy still prevented an unauthorized mock
+    payment. Only the operator's launch environment sets these variables.
+    The four-account boundary is therefore conditional on the override not
+    being set. Remove, restrict to tests, or harden before real payments.
+17. **Single-writer check (N1).** The auth service's startup check does
+    not prove that it owns the writer lock; an instance started outside the
+    launcher's `flock` with an open descriptor on the lock file ran as a
+    second writer in the R4 audit. Requires code execution as
+    `oxdeai-auth` (operator or root). Hardening required before real
+    payments (`docs/ISOLATION.md` §0.4).

@@ -54,7 +54,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { agentWritable } from "./identity.ts";
+import { ROLES, writableBy } from "./identity.ts";
 
 /** Dependencies the trusted runtime may load, pinned here, not in the lockfile. */
 export const TRUSTED_DEPENDENCIES = [
@@ -335,23 +335,64 @@ export function verifyArtifact(artifactRoot: string): { digest: string; store: s
     if (st.mode & 0o022) throw new ArtifactError("TRUST_STORE_WRITABLE_MODE", p);
   }
 
-  // Kernel check as the agent identity.
+  // Kernel check as every non-operator identity (agent and the three services).
   const node = realpathSync(process.execPath);
-  const candidates = [...allPaths(root), artifactsDir, store, join(store, "approved"), node, ...ancestors(store), ...ancestors(node)];
-  const writable = new Set(agentWritable(candidates));
-  for (const p of writable) {
-    // A sticky directory (e.g. /tmp) lets the agent create its own entries but
-    // not rename or replace ours: accept it if our next component is ours or root's.
-    const isAncestor = (child: string) => child.startsWith(p === "/" ? "/" : `${p}/`);
-    const sticky = (statSync(p).mode & 0o1000) !== 0;
-    const next = [store, node].filter(isAncestor).map((c) => join(p, relative(p, c).split("/")[0]!));
-    const ownedByUs = next.length > 0 && next.every((c) => [uid, 0].includes(lstatSync(c).uid) && !writable.has(c));
-    if (!(sticky && ownedByUs && p !== root && !p.startsWith(`${store}/`) && p !== store && p !== node)) {
-      throw new ArtifactError("ARTIFACT_AGENT_WRITABLE", p);
-    }
-  }
+  assertUntrustedCannotWrite(
+    [...allPaths(root), artifactsDir, store, join(store, "approved"), node, ...ancestors(store), ...ancestors(node)],
+    { anchors: [store, node], protectedRoots: [store, node] },
+  );
   return { digest, store, manifest };
 }
+
+/**
+ * Throws unless no non-operator identity (agent, gateway, auth, executor) can
+ * write any of `candidates`, as answered by the kernel for each identity. A
+ * writable ancestor of an anchor is accepted only if it is sticky (e.g. /tmp)
+ * and the anchor's next path component is operator- or root-owned and itself
+ * not writable: the identity can then add its own entries but not rename or
+ * replace ours. Nothing at or under a protected root may be writable.
+ */
+export function assertUntrustedCannotWrite(
+  candidates: readonly string[],
+  opts: { anchors: readonly string[]; protectedRoots: readonly string[] },
+): void {
+  const uid = process.getuid!();
+  for (const role of ROLES) {
+    const writable = new Set(writableBy(role, candidates));
+    for (const p of writable) {
+      const isAncestor = (child: string) => child !== p && child.startsWith(p === "/" ? "/" : `${p}/`);
+      const insideProtected = opts.protectedRoots.some((r) => p === r || p.startsWith(`${r}/`));
+      const sticky = (statSync(p).mode & 0o1000) !== 0;
+      const next = opts.anchors.filter(isAncestor).map((c) => join(p, relative(p, c).split("/")[0]!));
+      const ownedByUs = next.length > 0 && next.every((c) => [uid, 0].includes(lstatSync(c).uid) && !writable.has(c));
+      if (insideProtected || !(sticky && ownedByUs)) {
+        throw role === "agent" ? new ArtifactError("ARTIFACT_AGENT_WRITABLE", p) : new ArtifactError("ARTIFACT_SERVICE_WRITABLE", `${role}:${p}`);
+      }
+    }
+  }
+}
+
+/** Every path under `root`, and `root`. */
+export function treePaths(root: string): string[] {
+  return allPaths(root);
+}
+
+export { ancestors as ancestorDirs };
+
+/**
+ * Verify a copy of an artifact against its manifest (file set + hashes).
+ * Used for the deployed runtime copy that the service identities read.
+ */
+export function verifyCopy(copyRoot: string, manifest: Manifest): void {
+  const onDisk = walk(copyRoot, "DEPLOY_REJECTED").filter((p) => p !== "MANIFEST.json");
+  const listed = manifest.files.map((f) => f.path);
+  if (onDisk.length !== listed.length || onDisk.some((p, i) => p !== listed[i])) throw new ArtifactError("DEPLOY_FILE_SET_MISMATCH");
+  for (const f of manifest.files) {
+    if (sha256(readFileSync(join(copyRoot, f.path))) !== f.sha256) throw new ArtifactError("DEPLOY_HASH_MISMATCH", f.path);
+  }
+}
+
+export { setReadOnly };
 
 /** Root of the artifact this module was loaded from (or of the checkout). */
 export function selfRoot(moduleUrlPath: string): string {

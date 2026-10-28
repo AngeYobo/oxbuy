@@ -14,10 +14,10 @@ import { chmodSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { approveArtifact, removeTree, sealArtifact, verifyArtifact } from "../../src/isolation/artifact.ts";
+import { approveArtifact, removeTree, sealArtifact, verifyArtifact, verifyCopy } from "../../src/isolation/artifact.ts";
 import { agentCommand, agentIdentityUnavailableReason } from "../../src/isolation/identity.ts";
 import { launchIsolatedSystem as launchFromCheckout } from "../../src/isolation/launcher.ts";
-import { loadLauncher, newStore, REPO_ROOT } from "./trusted-artifact.ts";
+import { freshPolicyState, loadLauncher, newStore, removeStateRoot, REPO_ROOT } from "./trusted-artifact.ts";
 
 const BLOCKED = agentIdentityUnavailableReason();
 const opts = BLOCKED === null ? {} : { skip: `BLOCKED: ${BLOCKED}` };
@@ -72,8 +72,12 @@ async function assertLaunchRefused(launch: () => Promise<{ stop(): Promise<void>
 
 let store: string;
 let approved: string;
+// Phase 2B-R3: launches need an operator-initialized persistent policy state root.
+let policyStateRoot: string;
 before(() => {
   if (BLOCKED !== null) return;
+  policyStateRoot = freshPolicyState({ budget: "100000000" });
+  cleanups.push(() => removeStateRoot(policyStateRoot));
   store = newStore();
   cleanups.push(() => removeTree(store));
   approved = sealArtifact({ sourceRoot: workingTree(), store }).digest;
@@ -84,11 +88,17 @@ after(() => {
 });
 
 test("SI-01 a valid protected artifact launches and pays exactly once", opts, async () => {
-  const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT });
+  const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT, policyStateRoot });
   try {
     assert.equal(sys.artifact.digest, approved);
+    // Phase 2B-R1 adaptation: the service identities cannot enter the
+    // operator-only store, so the launcher deploys a copy of the approved
+    // artifact (<root>/app). The property checked is unchanged: the running
+    // code is byte-identical to the approved manifest.
     const argv = readFileSync(`/proc/${sys.pids().executor}/cmdline`, "utf8").split("\0");
-    assert.ok(argv[1]!.startsWith(join(store, "artifacts", approved) + "/"), "executor runs from the approved artifact");
+    assert.ok(argv[1]!.startsWith(sys.paths.app + "/"), "executor runs from the deployed copy");
+    const manifest = JSON.parse(readFileSync(join(store, "artifacts", approved, "MANIFEST.json"), "utf8"));
+    verifyCopy(sys.paths.app, manifest); // throws unless every file matches the approved manifest
     const out = (await sys.runAgent(PROBE, ["buy", sys.paths.publicSocket, "weather"])).result as any;
     assert.equal(out.result.decision, "ALLOW");
     assert.equal(sys.ledger().length, 1);
@@ -104,7 +114,7 @@ for (const target of ["src/isolation/executor-main.ts", "src/isolation/gateway-m
     plant(join(wt, target), marker);
 
     // The operator launches the approved artifact: the working tree is not an input.
-    const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT });
+    const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT, policyStateRoot });
     try {
       const out = (await sys.runAgent(PROBE, ["buy", sys.paths.publicSocket, "weather"])).result as any;
       assert.equal(out.result.decision, "ALLOW");
@@ -145,7 +155,7 @@ test("SI-03 agent modifies OxDeAI dependencies in node_modules: the sealed artif
   const resealed = sealArtifact({ sourceRoot: wt, store });
   assert.equal(resealed.digest, approved, "dependencies come from the verified registry tarball, not the working tree");
 
-  const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT });
+  const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT, policyStateRoot });
   try {
     const forged = (await sys.runAgent(PROBE, ["forge", sys.paths.publicSocket])).result as Record<string, any>;
     for (const v of Object.values(forged)) assert.equal(v.decision, "DENY", "signature verification intact");
@@ -175,7 +185,7 @@ test("SI-05 agent cannot alter the trust store, the approval, the artifact, or t
     assert.notEqual(r.status, 0, `agent wrote ${target}`);
     assert.match(r.stderr, /Permission denied/);
   }
-  const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT });
+  const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT, policyStateRoot });
   try {
     for (const cfg of [sys.paths.executorConfig, sys.paths.gatewayConfig]) {
       const r = asAgent(`printf '{}' > '${cfg}'`);

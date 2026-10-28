@@ -46,11 +46,41 @@ export type ExecutorConfig = {
   readonly faults?: ExecutorFaults;
 };
 
+/** Gateway (PEP). Holds no signing key and no payment credential. */
 export type GatewayConfig = {
   readonly publicSocketPath: string;
+  readonly authSocketPath: string;
   readonly executorSocketPath: string;
+  /** Defence in depth only: the executor also verifies every authorization. */
   readonly internalToken: string;
   readonly timeoutMs: number;
+  /** Public verification material for the PEP. */
+  readonly trust: {
+    readonly audience: string;
+    readonly keySet: KeySet;
+    readonly authority: AuthorizationAuthority;
+  };
+};
+
+/** Fault injection, set only by the operator in the auth service's private config. */
+export type AuthFaults = {
+  /** SIGKILL the auth service after the policy decision is committed, before the authorization is returned. */
+  readonly crashBeforeIssue?: boolean;
+};
+
+/** Authorization service (PDP + signer). Holds no payment credential. */
+export type AuthConfig = {
+  readonly socketPath: string;
+  /**
+   * Persistent policy state for this policy identity:
+   * <stateRoot>/<binding id> (src/isolation/policy-state-admin.ts). Must
+   * already be initialized; the service never creates it.
+   */
+  readonly stateDir: string;
+  /** flock(1) target; locked by the launcher's flock wrapper (single writer only when started that way, N1). */
+  readonly lockPath: string;
+  /** Append-only decision audit log (kept with the persistent state). */
+  readonly decisionLogPath: string;
   readonly pdp: {
     readonly privateKeyPem: string;
     readonly kid: string;
@@ -59,9 +89,8 @@ export type GatewayConfig = {
     readonly policyVersion: string;
     readonly ttlSeconds: number;
     readonly agentId: string;
-    /** Per-agent budget override, atomic units. */
-    readonly budget?: string;
   };
+  readonly faults?: AuthFaults;
 };
 
 export function readConfig<T>(path: string | undefined): T {
