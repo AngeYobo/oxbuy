@@ -1,0 +1,45 @@
+TAP version 13
+# Subtest: OR5 settle: the reporting journal must be the current domain and the reservation's domain; duplicates never release twice
+not ok 1 - OR5 settle: the reporting journal must be the current domain and the reservation's domain; duplicates never release twice
+  ---
+  duration_ms: 17.319467
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-HOP8hG/tests/executor/outcome-report.test.ts:69:1'
+  failureType: 'testCodeFailure'
+  error: 'The "string" argument must be of type string. Received type undefined (undefined)'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-HOP8hG/tests/executor/outcome-report.test.ts:89:10)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+# Subtest: CX2d forged, foreign-domain, unknown, out-of-binding, and unproven reports never move budget
+not ok 2 - CX2d forged, foreign-domain, unknown, out-of-binding, and unproven reports never move budget
+  ---
+  duration_ms: 2977.557853
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-HOP8hG/tests/isolation/financial-integrity.test.ts:382:1'
+  failureType: 'testCodeFailure'
+  error: 'The "string" argument must be of type string. Received type undefined (undefined)'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-HOP8hG/tests/isolation/financial-integrity.test.ts:391:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 0
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3911.172462

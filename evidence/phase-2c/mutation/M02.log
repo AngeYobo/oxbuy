@@ -1,0 +1,52 @@
+TAP version 13
+# Subtest: AN2 the crash-state table, row by row
+not ok 1 - AN2 the crash-state table, row by row
+  ---
+  duration_ms: 3.100209
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-f8q0iE/tests/authorization/policy-anchor.test.ts:31:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /POLICY_STATE_ROLLBACK:state version 1, anchor head version 2/. Input:
+    
+    'ACCEPT'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: 'ACCEPT'
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-f8q0iE/tests/authorization/policy-anchor.test.ts:38:10)
+    Test.runInAsyncScope (node:async_hooks:227:14)
+    Test.run (node:internal/test_runner/test:1402:25)
+    Test.start (node:internal/test_runner/test:1262:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+  ...
+# Subtest: CX1a regression: the state from one commit earlier (after a completed DONE) is refused at startup and while running
+not ok 2 - CX1a regression: the state from one commit earlier (after a completed DONE) is refused at startup and while running
+  ---
+  duration_ms: 4584.841378
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-f8q0iE/tests/isolation/financial-integrity.test.ts:159:1'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected rejection.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  operator: 'rejects'
+  stack: |-
+    process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    async TestContext.<anonymous> (file:///tmp/oxdeai-mutant-f8q0iE/tests/isolation/financial-integrity.test.ts:175:3)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 0
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5467.071371

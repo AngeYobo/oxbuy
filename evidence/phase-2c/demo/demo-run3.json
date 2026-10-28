@@ -1,0 +1,69 @@
+{
+  "artifact": "88fa7643c7f265135742df60b065b7647f80d0a56c0adea0b8a495f40c22164d",
+  "processes": {
+    "operator_uid": 1000,
+    "gateway_pid": 57690,
+    "executor_pid": 57651
+  },
+  "agent": {
+    "agent_uid": 999,
+    "weather": {
+      "stage": "authorize",
+      "decision": "DENY",
+      "reasons": [
+        "BUDGET_EXCEEDED"
+      ]
+    },
+    "unlisted": {
+      "stage": "authorize",
+      "decision": "DENY",
+      "reasons": [
+        "ALLOWLIST_TARGET"
+      ]
+    },
+    "executor_socket_connect": "EACCES",
+    "wallet_key_read": "EACCES"
+  },
+  "ledger_payments": 2,
+  "journal": [
+    {
+      "intent_hash": "4cf63d9f430cf5b1db6b7a81326663bbb7c6adfd32a8c7101efcb548938eb8a3",
+      "state": "SETTLED"
+    },
+    {
+      "intent_hash": "807d3ff3e73bbceb15a09c55cf57d92428f3738984e18c64e1551d76b381a20e",
+      "state": "SETTLED"
+    }
+  ],
+  "journal_auths": [
+    {
+      "auth_id": "beec99b3a23b169a690d4a533bc5a2c07d36deaa38015a60a42315e20f9e4587",
+      "disposition": "RESERVED"
+    },
+    {
+      "auth_id": "8e13fa2a5446c08535c7c5ec19410b168aad7ce807441dc26a06ba34a9ec8621",
+      "disposition": "RESERVED"
+    }
+  ],
+  "policy_state": {
+    "version": 4,
+    "budget_limit": {
+      "agent-celo-poc-1": "20000"
+    },
+    "spent_in_period": {
+      "agent-celo-poc-1": "20000"
+    },
+    "reservations": {
+      "beec99b3a23b169a690d4a533bc5a2c07d36deaa38015a60a42315e20f9e4587": {
+        "state": "CONFIRMED",
+        "amount": "10000",
+        "charged": "10000"
+      },
+      "8e13fa2a5446c08535c7c5ec19410b168aad7ce807441dc26a06ba34a9ec8621": {
+        "state": "CONFIRMED",
+        "amount": "10000",
+        "charged": "10000"
+      }
+    }
+  }
+}

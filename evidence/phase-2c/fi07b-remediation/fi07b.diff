@@ -1,0 +1,21 @@
+--- a/tests/isolation/financial-integrity.test.ts	2026-10-28 14:11:50.210910598 +0000
++++ b/tests/isolation/financial-integrity.test.ts	2026-10-28 14:11:50.518910609 +0000
+@@ -582,13 +582,15 @@
+ });
+ 
+ test("FI-07b restart with a pending reservation, new deployment (new PDP key): the old authorization is refused, stays charged until its own domain cancels it, never pays", opts, async () => {
+-  const P = policyRoot(String(PRICE), 3);
++  // TTL 15 s: the authorization must still be temporally valid when the new deployment verifies it
++  // (a redeployment takes ~2-3 s), so that only the key can refuse it; it expires later for the cancellation.
++  const P = policyRoot(String(PRICE), 15);
+   const E = executorRoot();
+-  const d1 = await launch({ policyStateRoot: P, executorStateRoot: E, ttlSeconds: 3 });
++  const d1 = await launch({ policyStateRoot: P, executorStateRoot: E, ttlSeconds: 15 });
+   const a = await authorizeAsAgent(d1);
+   const id = a.authorization.auth_id;
+   await stop(d1);
+-  const d2 = await launch({ policyStateRoot: P, executorStateRoot: E, ttlSeconds: 3 });
++  const d2 = await launch({ policyStateRoot: P, executorStateRoot: E, ttlSeconds: 15 });
+   assert.equal(reservation(d2, id)!.state, "RESERVED");
+   assert.equal(spent(policyFile(d2)), PRICE);
+   const r = await submit(d2, a);

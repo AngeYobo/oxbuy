@@ -47,10 +47,25 @@ export function withMockSettlement(inner: PaymentAdapter, paths: MockSettlementP
   };
 }
 
+/**
+ * Ledger entries. A final line that is not complete JSON (crash during the
+ * append, before fsync returned) is not a payment and is skipped; an
+ * unparsable line anywhere else is corruption and throws.
+ */
 export function readMockLedger(ledgerPath: string): MockLedgerEntry[] {
   if (!existsSync(ledgerPath)) return [];
-  return readFileSync(ledgerPath, "utf8")
-    .split("\n")
-    .filter((line) => line !== "")
-    .map((line) => JSON.parse(line) as MockLedgerEntry);
+  return parseMockLedger(readFileSync(ledgerPath, "utf8"));
+}
+
+export function parseMockLedger(text: string): MockLedgerEntry[] {
+  const lines = text.split("\n").filter((line) => line !== "");
+  const out: MockLedgerEntry[] = [];
+  lines.forEach((line, i) => {
+    try {
+      out.push(JSON.parse(line) as MockLedgerEntry);
+    } catch {
+      if (i !== lines.length - 1 || text.endsWith("\n")) throw new Error(`LEDGER_CORRUPT:line ${i + 1}`);
+    }
+  });
+  return out;
 }

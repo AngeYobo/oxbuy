@@ -104,11 +104,19 @@ function receiptViolation(receipt: unknown, request: PurchaseRequest): string | 
 export function createPaymentExecutor(options: ExecutorOptions) {
   const { journal, verification: v } = options;
 
+  /** Intents whose `pay` is running in this process right now (outcome reports: EXECUTING, not UNCERTAIN). */
+  const inFlight = new Set<string>();
+
   async function execute(body: unknown): Promise<ExecutorOutcome> {
     // Pre-payment checks: any failure here means nothing was signed.
     let intentHash: string;
     let authId: string;
     let request: PurchaseRequest;
+    // Set once the authorization is proven authentic, unexpired, and bound to
+    // this action. From then on a refusal consumes the auth_id durably
+    // (REJECTED_BEFORE_EXECUTION) so its budget reservation can be released
+    // safely: a consumed auth_id can never be used to pay (Phase 2C; F3).
+    let authentic = false;
     try {
       const { action, authorization } = parseEnvelope(body);
       intentHash = hashGatewayAction(action);
@@ -126,6 +134,7 @@ export function createPaymentExecutor(options: ExecutorOptions) {
       if (authorization.intent_hash !== intentHash) throw new Error("EXECUTOR_INTENT_HASH_MISMATCH");
       authId = authorization.auth_id;
       request = validatePurchaseRequest((action as Record<string, unknown>).request);
+      authentic = true;
       const quote = await options.adapter.quote(request);
       const u = new URL(request.url);
       if (quote.network !== request.network) throw new Error("EXECUTOR_QUOTE_NETWORK_MISMATCH");
@@ -134,47 +143,64 @@ export function createPaymentExecutor(options: ExecutorOptions) {
       if (quote.resource !== `${u.origin}${u.pathname}`) throw new Error("EXECUTOR_QUOTE_RESOURCE_MISMATCH");
       if (BigInt(quote.amount) > BigInt(request.max_amount)) throw new Error("EXECUTOR_QUOTE_EXCEEDS_AUTHORIZED_MAX");
     } catch (err) {
+      if (!authentic) return { outcome: "NOT_EXECUTED", error: message(err) };
+      try {
+        const rec = journal.consume({ auth_id: authId!, intent_hash: intentHash!, disposition: "REJECTED_BEFORE_EXECUTION", detail: message(err) });
+        // Already consumed earlier (a replay): report what the journal holds, never a new rejection.
+        if (rec.disposition !== "REJECTED_BEFORE_EXECUTION") return { outcome: "NOT_EXECUTED", error: "EXECUTOR_AUTH_REPLAY" };
+      } catch (storageErr) {
+        return { outcome: "NOT_EXECUTED", error: `${message(err)};EXECUTOR_JOURNAL_UNAVAILABLE:${message(storageErr)}` };
+      }
       return { outcome: "NOT_EXECUTED", error: message(err) };
     }
 
     let reservation;
+    inFlight.add(intentHash);
     try {
-      reservation = journal.reserve({ intent_hash: intentHash, auth_id: authId, request });
-    } catch (err) {
-      return { outcome: "NOT_EXECUTED", error: `EXECUTOR_JOURNAL_UNAVAILABLE:${message(err)}` };
-    }
-    if (!reservation.ok) {
-      if (reservation.reason === "AUTH_REPLAY") return { outcome: "NOT_EXECUTED", error: "EXECUTOR_AUTH_REPLAY" };
-      // This request is never paid. If the earlier attempt's outcome is not
-      // definitive, the intent's payment status is unknown, not "not executed".
-      const prior = reservation.prior;
-      if (prior === "STARTED" || prior === "UNKNOWN") {
-        return { outcome: "PAYMENT_UNKNOWN", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", prior_state: prior };
-      }
-      return { outcome: "NOT_EXECUTED", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", prior_state: prior };
+      return await reserveAndPay();
+    } finally {
+      inFlight.delete(intentHash);
     }
 
-    let receipt: unknown;
-    try {
-      receipt = await options.adapter.pay({ intent_hash: intentHash, request });
-    } catch (err) {
-      if (err instanceof PaymentRefusedError) {
-        return finish(intentHash, { outcome: "NOT_EXECUTED", error: err.message }, "REFUSED_BEFORE_SIGNING", err.message);
+    async function reserveAndPay(): Promise<ExecutorOutcome> {
+      try {
+        reservation = journal.reserve({ intent_hash: intentHash, auth_id: authId, request });
+      } catch (err) {
+        return { outcome: "NOT_EXECUTED", error: `EXECUTOR_JOURNAL_UNAVAILABLE:${message(err)}` };
       }
-      return finish(
-        intentHash,
-        { outcome: "PAYMENT_UNKNOWN", error: `EXECUTOR_PAYMENT_OUTCOME_UNKNOWN:${message(err)}` },
-        "UNKNOWN",
-        message(err),
-      );
-    }
+      if (!reservation.ok) {
+        if (reservation.reason === "AUTH_REPLAY") return { outcome: "NOT_EXECUTED", error: "EXECUTOR_AUTH_REPLAY" };
+        // This request is never paid. If the earlier attempt's outcome is not
+        // definitive, the intent's payment status is unknown, not "not executed".
+        const prior = reservation.prior;
+        if (prior === "STARTED" || prior === "UNKNOWN") {
+          return { outcome: "PAYMENT_UNKNOWN", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", prior_state: prior };
+        }
+        return { outcome: "NOT_EXECUTED", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", prior_state: prior };
+      }
 
-    // Detects a bad settlement after the fact; it cannot undo it.
-    const violation = receiptViolation(receipt, request);
-    if (violation !== null) {
-      return finish(intentHash, { outcome: "PAYMENT_UNKNOWN", error: violation, receipt }, "UNKNOWN", violation, receipt);
+      let receipt: unknown;
+      try {
+        receipt = await options.adapter.pay({ intent_hash: intentHash, request });
+      } catch (err) {
+        if (err instanceof PaymentRefusedError) {
+          return finish(intentHash, { outcome: "NOT_EXECUTED", error: err.message }, "REFUSED_BEFORE_SIGNING", err.message);
+        }
+        return finish(
+          intentHash,
+          { outcome: "PAYMENT_UNKNOWN", error: `EXECUTOR_PAYMENT_OUTCOME_UNKNOWN:${message(err)}` },
+          "UNKNOWN",
+          message(err),
+        );
+      }
+
+      // Detects a bad settlement after the fact; it cannot undo it.
+      const violation = receiptViolation(receipt, request);
+      if (violation !== null) {
+        return finish(intentHash, { outcome: "PAYMENT_UNKNOWN", error: violation, receipt }, "UNKNOWN", violation, receipt);
+      }
+      return finish(intentHash, { outcome: "EXECUTED", receipt: receipt as PaymentReceipt }, "SETTLED", undefined, receipt);
     }
-    return finish(intentHash, { outcome: "EXECUTED", receipt: receipt as PaymentReceipt }, "SETTLED", undefined, receipt);
   }
 
   /**
@@ -236,6 +262,8 @@ export function createPaymentExecutor(options: ExecutorOptions) {
     },
     /** Operator/test inspection of the payment journal. Never handed to the agent. */
     journal: { get: journal.get, inspect: journal.inspect },
+    /** Intents being paid right now (for outcome reports). */
+    inFlight: (): ReadonlySet<string> => inFlight,
   };
 }
 

@@ -1,0 +1,98 @@
+TAP version 13
+# Subtest: OR1 a valid report verifies and yields its facts and journal
+ok 1 - OR1 a valid report verifies and yields its facts and journal
+  ---
+  duration_ms: 4.286904
+  type: 'test'
+  ...
+# Subtest: OR2 any change to a signed report, a foreign key, or a bad shape is refused
+ok 2 - OR2 any change to a signed report, a foreign key, or a bad shape is refused
+  ---
+  duration_ms: 4.896407
+  type: 'test'
+  ...
+# Subtest: OR3 derivation: NOT_EXECUTED only when the journal proves `pay` did not (successfully) run
+not ok 3 - OR3 derivation: NOT_EXECUTED only when the journal proves `pay` did not (successfully) run
+  ---
+  duration_ms: 4.269363
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-bz8IWW/tests/executor/outcome-report.test.ts:46:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      {
+    +   outcome: 'NOT_EXECUTED',
+    +   reason: 'NOT_STARTED'
+    -   outcome: 'UNCERTAIN'
+      }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    outcome: 'UNCERTAIN'
+  actual:
+    outcome: 'NOT_EXECUTED'
+    reason: 'NOT_STARTED'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-bz8IWW/tests/executor/outcome-report.test.ts:52:10)
+    Test.runInAsyncScope (node:async_hooks:227:14)
+    Test.run (node:internal/test_runner/test:1402:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+    Test.postRun (node:internal/test_runner/test:1542:19)
+    Test.run (node:internal/test_runner/test:1467:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+  ...
+# Subtest: OR4 one acknowledgement key per outcome and reason
+ok 4 - OR4 one acknowledgement key per outcome and reason
+  ---
+  duration_ms: 0.596002
+  type: 'test'
+  ...
+# Subtest: OR5 settle: the reporting journal must be the current domain and the reservation's domain; duplicates never release twice
+ok 5 - OR5 settle: the reporting journal must be the current domain and the reservation's domain; duplicates never release twice
+  ---
+  duration_ms: 19.154287
+  type: 'test'
+  ...
+# Subtest: FI-04/08 crash after the payment started (crashBeforePay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it
+not ok 6 - FI-04/08 crash after the payment started (crashBeforePay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it
+  ---
+  duration_ms: 23619.919291
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-bz8IWW/tests/isolation/financial-integrity.test.ts:480:3'
+  failureType: 'testCodeFailure'
+  error: 'timeout waiting for UNCERTAIN'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    waitFor (file:///tmp/oxdeai-mutant-bz8IWW/tests/isolation/financial-integrity.test.ts:123:33)
+    async TestContext.<anonymous> (file:///tmp/oxdeai-mutant-bz8IWW/tests/isolation/financial-integrity.test.ts:493:15)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+# Subtest: FI-04/08 crash after the payment started (crashAfterPay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it
+not ok 7 - FI-04/08 crash after the payment started (crashAfterPay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it
+  ---
+  duration_ms: 23454.020322
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-bz8IWW/tests/isolation/financial-integrity.test.ts:480:3'
+  failureType: 'testCodeFailure'
+  error: 'timeout waiting for UNCERTAIN'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    waitFor (file:///tmp/oxdeai-mutant-bz8IWW/tests/isolation/financial-integrity.test.ts:123:33)
+    async TestContext.<anonymous> (file:///tmp/oxdeai-mutant-bz8IWW/tests/isolation/financial-integrity.test.ts:493:15)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 4
+# fail 3
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 48120.15697

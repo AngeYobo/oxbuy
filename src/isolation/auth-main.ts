@@ -5,28 +5,33 @@
  * Holds the Ed25519 authorization signing key and the durable policy state.
  * Holds no payment credential and cannot reach the executor.
  *
- * It exposes exactly one operation, and no generic signing endpoint:
+ * It exposes exactly one operation to the gateway, and no generic signing endpoint:
  *   POST /v1/authorize   body: a PurchaseRequest (exact key set), nothing else
  *
  * The service validates the request itself, loads policy state from its own
  * protected store, runs the published PolicyEngine (fail-closed allowlists,
  * per-action cap, budget, velocity, nonce replay, ...), commits the next
- * state, and only then builds and signs the AuthorizationV1 itself. Nothing
- * the caller sends ends up in the authorization except through the
- * validated request, which is bound into the intent hash. Identity fields
- * (agent_id, nonce, intent_id, timestamp, issuer, audience, expiry) come
- * from this service, never from the caller.
+ * state together with a reservation for the authorization, and only then
+ * builds and signs the AuthorizationV1 itself. Nothing the caller sends ends
+ * up in the authorization except through the validated request, which is
+ * bound into the intent hash. Identity fields (agent_id, nonce, intent_id,
+ * timestamp, issuer, audience, expiry) come from this service, never from the
+ * caller.
+ *
+ * Phase 2C: a second socket serves only the executor (settle channel,
+ * src/isolation/settle-channel.ts):
+ *   POST /v1/settle           a signed outcome report, with a peer-identity proof
+ *   POST /v1/settle/expired   RESERVED reservations past expiry (cancellation candidates)
  *
  * Policy state is persistent and operator-initialized
  * (src/isolation/policy-state-admin.ts). At startup the service computes its
  * own policy binding (issuer, policy_id, policy_version, agent_id) from its
- * own engine configuration and opens the existing state for exactly that
- * binding, under a kernel writer lock it must already hold (it is started
- * as `flock --nonblock <lockPath> node auth-main.ts ...`). Missing, unreadable,
- * corrupt, or foreign state, or a missing lock, makes it refuse to start
- * (exit 78): it never recreates a budget. The lock self-check does not prove
- * that this process owns the lock (see `assertWriterLockHeld`, N1): a single
- * writer is guaranteed only when started through the launcher's flock.
+ * own engine configuration, takes the exclusive writer lock itself on its own
+ * descriptor (exit 75 if another process holds it, 66 if it cannot be
+ * opened), and opens the existing state for exactly that binding. Missing,
+ * unreadable, corrupt, foreign, old-format, or rolled-back state, or an
+ * anchor that is missing or not append-only, makes it refuse to start
+ * (exit 78): it never recreates a budget.
  *
  *   node auth-main.ts <auth-config.json>
  */
@@ -35,8 +40,11 @@ import type { PurchaseRequest } from "../agent/purchase-request.ts";
 import { createAuthorizationService } from "../authorization/authorization-service.ts";
 import { createInMemoryPolicyStateStore, type PolicyStateStore } from "../authorization/policy-state.ts";
 import { openFilePolicyStateStore, type PolicyBinding } from "../authorization/policy-state-file.ts";
+import { acquireExclusiveLock, LockError, type ExclusiveLock } from "../durable/exclusive-lock.ts";
+import { domainId } from "../executor/execution-domain.ts";
 import { emit, readConfig, type AuthConfig } from "./config.ts";
 import { serveJson } from "./ipc.ts";
+import { verifyPeerProof } from "./settle-channel.ts";
 
 const config = readConfig<AuthConfig>(process.argv[2]);
 process.umask(0o077);
@@ -50,24 +58,48 @@ const serviceOptions = {
   ttlSeconds: pdp.ttlSeconds,
   now: () => Math.floor(Date.now() / 1000),
   signingKey: { privateKeyPem: pdp.privateKeyPem, kid: pdp.kid },
+  executorReportKey: config.executorReportKey,
+  executionDomain: config.executionDomain,
 };
 // The binding comes from this service's own engine, not from any input.
 const authority = createAuthorizationService({ ...serviceOptions, stateStore: createInMemoryPolicyStateStore(undefined) }).trustMaterial.authority;
 const binding: PolicyBinding = { issuer: authority.issuer, policyId: authority.policyId, policyVersion: pdp.policyVersion, agentId: pdp.agentId };
+// CX2: the authorization audience must name the configured execution domain.
+if (!pdp.audience.endsWith(`#exec-domain=${domainId(config.executionDomain)}`)) {
+  process.stderr.write(`${JSON.stringify({ event: "refused", role: "auth", reason: "EXECUTION_DOMAIN_MISMATCH:audience" })}\n`);
+  process.exit(78);
+}
+
+function refuse(code: number, reason: string): never {
+  process.stderr.write(`${JSON.stringify({ event: "refused", role: "auth", reason })}\n`);
+  process.exit(code);
+}
+
+let lock: ExclusiveLock;
+try {
+  lock = acquireExclusiveLock(config.lockPath, { create: true });
+} catch (err) {
+  if (err instanceof LockError && err.code === "LOCK_HELD") refuse(75, `POLICY_STATE_LOCKED:${err.message}`);
+  refuse(66, `POLICY_STATE_LOCK_UNAVAILABLE:${(err as Error).message}`);
+}
 
 let store: PolicyStateStore;
 try {
-  store = openFilePolicyStateStore(config.stateDir, { binding, lockPath: config.lockPath });
+  store = openFilePolicyStateStore(config.stateDir, {
+    binding,
+    lock,
+    anchorPath: config.anchorPath,
+    faults: { crashAfterPrepare: config.faults?.crashAfterPrepare, crashAfterRename: config.faults?.crashAfterRename, crashAfterDirSync: config.faults?.crashAfterDirSync, failDoneAppend: config.faults?.failDoneAppend },
+  });
 } catch (err) {
-  process.stderr.write(`${JSON.stringify({ event: "refused", role: "auth", reason: (err as Error).message })}\n`);
-  process.exit(78);
+  refuse(78, (err as Error).message);
 }
 
 const stateStore = config.faults?.crashBeforeIssue
   ? {
       load: () => store.load(),
-      async commit(next: Parameters<typeof store.commit>[0], v: number) {
-        const ok = await store.commit(next, v);
+      async commit(...args: Parameters<typeof store.commit>) {
+        const ok = await store.commit(...args);
         if (ok) process.kill(process.pid, "SIGKILL"); // decision committed, authorization never issued
         return ok;
       },
@@ -103,10 +135,53 @@ const server = await serveJson(config.socketPath, 0o660, {
   },
 });
 
+/** Settle-channel envelope: {body, proof}; refused unless the kernel attests the executor sent it. */
+function peerChecked(envelope: unknown): { ok: true; body: Record<string, unknown> } | { ok: false; reason: string } {
+  const e = (typeof envelope === "object" && envelope !== null ? envelope : {}) as { body?: unknown; proof?: unknown };
+  try {
+    verifyPeerProof(config.proofDir, config.executorUid, e.proof, e.body);
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
+  }
+  return typeof e.body === "object" && e.body !== null ? { ok: true, body: e.body as Record<string, unknown> } : { ok: false, reason: "SETTLE_INVALID_BODY" };
+}
+
+const settleServer = await serveJson(config.settleSocketPath, 0o660, {
+  "/v1/settle": async (envelope) => {
+    const c = peerChecked(envelope);
+    if (!c.ok) {
+      audit({ event: "settle_refused", reason: c.reason });
+      return { status: 403, body: { status: "REJECTED", reason: c.reason } };
+    }
+    const result = await service.settle(c.body.report);
+    audit({
+      event: "settle",
+      status: result.status,
+      ...(result.status === "REJECTED"
+        ? { reason: result.reason }
+        : { auth_id: result.reservation.auth_id, state: result.reservation.state, released: result.released }),
+    });
+    if (result.status === "APPLIED" && config.faults?.crashAfterSettleCommit) process.kill(process.pid, "SIGKILL");
+    return { status: 200, body: result };
+  },
+  "/v1/settle/expired": async (envelope) => {
+    const c = peerChecked(envelope);
+    if (!c.ok) return { status: 403, body: { status: "REJECTED", reason: c.reason } };
+    const grace = Number(c.body.grace_seconds);
+    if (!Number.isSafeInteger(grace) || grace < 0) return { status: 400, body: { status: "REJECTED", reason: "SETTLE_INVALID_GRACE" } };
+    try {
+      return { status: 200, body: { expired: await service.expiredReservations(grace) } };
+    } catch (err) {
+      return { status: 503, body: { status: "REJECTED", reason: (err as Error).message } };
+    }
+  },
+});
+
 emit({ event: "ready", role: "auth", pid: process.pid });
 
 function shutdown() {
   // The writer lock is released by the kernel when this process exits.
+  settleServer.close();
   server.close(() => process.exit(0));
 }
 process.on("SIGTERM", shutdown);

@@ -10,7 +10,7 @@ import { INTERNAL_EXECUTOR_TOKEN_HEADER } from "@oxdeai/guard";
 import { createMockBuyAdapter } from "../../src/adapters/mock-buy/mock-buy.ts";
 import { createPaymentExecutor } from "../../src/executor/executor.ts";
 import type { PaymentAdapter } from "../../src/executor/payment-adapter.ts";
-import { openFilePaymentJournal, type FilePaymentJournal } from "../../src/executor/payment-journal.ts";
+import { initFilePaymentJournal, openFilePaymentJournal, type FilePaymentJournal } from "../../src/executor/payment-journal.ts";
 import { createLocalSystem } from "../../src/system.ts";
 import { authorize, requestFor, SERVICES } from "../helpers.ts";
 
@@ -24,6 +24,8 @@ function freshDir(): string {
   // Under /tmp, whose default ACL grants "other" rw- on new files.
   const d = mkdtempSync(join(tmpdir(), "oxdeai-journal-test-"));
   dirs.push(d);
+  // Phase 2C: a journal is created once, explicitly, and never implicitly by open.
+  initFilePaymentJournal(join(d, "journal"));
   return join(d, "journal");
 }
 function openJ(dir: string): FilePaymentJournal {
@@ -39,11 +41,6 @@ afterEach(() => {
   }
 });
 
-/** A pid that is certainly not running: a child that already exited. */
-function deadPid(): number {
-  const r = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" });
-  return Number(r.stdout);
-}
 
 test("J1 records survive close and reopen; a reserved intent is never reserved again", () => {
   const dir = freshDir();
@@ -68,19 +65,19 @@ test("J2 an auth_id is consumed durably: reusing it for another intent is AUTH_R
   assert.deepEqual(openJ(dir).reserve({ intent_hash: H2, auth_id: "a1", request: REQ }), { ok: false, reason: "AUTH_REPLAY" });
 });
 
-test("J3 single writer: a second open fails while the first holds the lock; a dead holder's lock is recovered", () => {
+test("J3 single writer: a second open fails while the first holds the lock; released on close", () => {
+  // Phase 2C (B6): the lock is a kernel flock on the holder's own descriptor;
+  // there is no pid file and no stale-lock takeover. Cross-process cases
+  // (crash, simultaneous start) are in tests/isolation/financial-integrity.test.ts.
   const dir = freshDir();
   const j = openJ(dir);
   assert.throws(() => openFilePaymentJournal(dir), /JOURNAL_LOCKED/);
   j.close();
   open.pop();
   const k = openJ(dir);
-  assert.equal(k.staleLockRecovered, false);
+  assert.throws(() => openFilePaymentJournal(dir), /JOURNAL_LOCKED/);
   k.close();
   open.pop();
-
-  writeFileSync(join(dir, "executor.lock"), String(deadPid()));
-  assert.equal(openJ(dir).staleLockRecovered, true);
 });
 
 test("J4 crash recovery: STARTED stays STARTED and is listed for reconciliation; never auto-converted", () => {
@@ -89,9 +86,9 @@ test("J4 crash recovery: STARTED stays STARTED and is listed for reconciliation;
   j.reserve({ intent_hash: H1, auth_id: "a1", request: REQ });
   j.reserve({ intent_hash: H2, auth_id: "a2", request: REQ });
   j.record(H2, "UNKNOWN", "settle_uncertain");
-  // Simulated crash: the lock stays behind with a pid that no longer runs.
+  // Simulated crash: the descriptor (and so the kernel lock) goes away without close().
   open.pop();
-  writeFileSync(join(dir, "executor.lock"), String(deadPid()));
+  j.close();
 
   const k = openJ(dir);
   assert.deepEqual(k.get(H1), { state: "STARTED" });
@@ -121,7 +118,8 @@ test("J6 storage permissions: directories 0700 and files 0600 despite the parent
   j.record(H1, "SETTLED");
   for (const d of [dir, join(dir, "intents"), join(dir, "auths")]) assert.equal(statSync(d).mode & 0o777, 0o700, d);
   const files = [
-    join(dir, "executor.lock"),
+    join(dir, "journal.lock"),
+    join(dir, "JOURNAL.json"),
     join(dir, "journal.log"),
     join(dir, "intents", H1),
     ...readdirSync(join(dir, "auths")).map((n) => join(dir, "auths", n)),

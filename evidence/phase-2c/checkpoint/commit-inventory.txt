@@ -1,0 +1,150 @@
+# Phase 2C checkpoint: every path in the commit (status vs a2b85c1; force = git-ignored *.log added by explicit path)
+M        docs/ARCHITECTURE.md
+M        docs/CONFORMANCE.md
+M        docs/DEMO.md
+A        docs/FINANCIAL-INTEGRITY.md
+M        docs/ISOLATION.md
+A        evidence/phase-2c/MANIFEST.md
+A        evidence/phase-2c/RECOVERY.md
+A        evidence/phase-2c/adversarial/README.md
+A        evidence/phase-2c/adversarial/fi-run1.tap
+A        evidence/phase-2c/adversarial/fi07-run2.tap
+A        evidence/phase-2c/adversarial/fi15-run2.tap
+A        evidence/phase-2c/an4-fixture-reverify/README.md
+A        evidence/phase-2c/an4-fixture-reverify/an4-current-source.txt
+A        evidence/phase-2c/an4-fixture-reverify/an4.tap
+A        evidence/phase-2c/an4-fixture-reverify/anchor-suite.tap
+A force  evidence/phase-2c/an4-fixture-reverify/cx1-original-reproducer.log
+A force  evidence/phase-2c/an4-fixture-reverify/cx2-original-reproducer.log
+A force  evidence/phase-2c/an4-fixture-reverify/cx3-original-reproducer.log
+A        evidence/phase-2c/an4-fixture-reverify/exit-codes.txt
+A        evidence/phase-2c/an4-fixture-reverify/full-suite.tap
+A        evidence/phase-2c/an4-fixture-reverify/sha256-before.txt
+A force  evidence/phase-2c/an4-fixture-reverify/typecheck.log
+A        evidence/phase-2c/checkpoint/README.md
+A        evidence/phase-2c/checkpoint/commit-inventory.txt
+A        evidence/phase-2c/checkpoint/source-sha256.txt
+A        evidence/phase-2c/checkpoint/verify-docs-recheck.txt
+A        evidence/phase-2c/counterexamples-after-fix/README.md
+A force  evidence/phase-2c/counterexamples-after-fix/cx1-after-fix.log
+A force  evidence/phase-2c/counterexamples-after-fix/cx2-after-fix.log
+A        evidence/phase-2c/counterexamples-after-fix/exit-codes.txt
+A        evidence/phase-2c/counterexamples-cx3-after-fix/README.md
+A force  evidence/phase-2c/counterexamples-cx3-after-fix/cx3-after-fix.log
+A        evidence/phase-2c/counterexamples-cx3-after-fix/exit-code.txt
+A        evidence/phase-2c/counterexamples-cx3/README.md
+A force  evidence/phase-2c/counterexamples-cx3/cx3-run1.log
+A        evidence/phase-2c/counterexamples-cx3/reproduce.ts
+A        evidence/phase-2c/counterexamples-cx3/unit-tests-run1.tap
+A        evidence/phase-2c/counterexamples/README.md
+A force  evidence/phase-2c/counterexamples/cx1-run1.log
+A force  evidence/phase-2c/counterexamples/cx2-run1-not-reproduced.log
+A force  evidence/phase-2c/counterexamples/cx2-run2.log
+A        evidence/phase-2c/counterexamples/reproduce.ts
+A        evidence/phase-2c/demo/README.md
+A        evidence/phase-2c/demo/approve.json
+A        evidence/phase-2c/demo/demo-blocked-no-executor-state.json
+A        evidence/phase-2c/demo/demo-inprocess.json
+A        evidence/phase-2c/demo/demo-run1.json
+A        evidence/phase-2c/demo/demo-run1.stderr
+A        evidence/phase-2c/demo/demo-run2.json
+A        evidence/phase-2c/demo/demo-run2.stderr
+A        evidence/phase-2c/demo/demo-run3.json
+A        evidence/phase-2c/demo/demo-run3.stderr
+A        evidence/phase-2c/demo/exit-codes.txt
+A        evidence/phase-2c/demo/policy-verify-after-run3.json
+A force  evidence/phase-2c/demo/provision.log
+A        evidence/phase-2c/demo/seal.json
+A        evidence/phase-2c/demo/setup.txt
+A        evidence/phase-2c/fi07b-remediation/README.md
+A        evidence/phase-2c/fi07b-remediation/exit-codes.txt
+A        evidence/phase-2c/fi07b-remediation/fi07b-alone-run1.tap
+A        evidence/phase-2c/fi07b-remediation/fi07b-alone-run2.tap
+A        evidence/phase-2c/fi07b-remediation/fi07b-alone-run3.tap
+A        evidence/phase-2c/fi07b-remediation/fi07b.diff
+A        evidence/phase-2c/fi07b-remediation/full-suite.tap
+A        evidence/phase-2c/fi07b-remediation/full-suite.txt
+A        evidence/phase-2c/fi07b-remediation/sha256.txt
+A force  evidence/phase-2c/fi07b-remediation/timing-probe-before.log
+A        evidence/phase-2c/fi07b-remediation/timing-probe.test.ts
+A force  evidence/phase-2c/fi07b-remediation/typecheck.log
+A        evidence/phase-2c/final/baseline.txt
+A        evidence/phase-2c/final/exit-codes.txt
+A        evidence/phase-2c/final/fi07b-after-fix.tap
+A        evidence/phase-2c/final/file-inventory.txt
+A        evidence/phase-2c/final/protected-files.txt
+A        evidence/phase-2c/final/run1-exit-codes.txt
+A        evidence/phase-2c/final/run1-test-results.tap
+A        evidence/phase-2c/final/run1-test-results.txt
+A        evidence/phase-2c/final/test-results.tap
+A        evidence/phase-2c/final/test-results.txt
+A force  evidence/phase-2c/final/typecheck.log
+A        evidence/phase-2c/final/verification-code-unchanged.txt
+A        evidence/phase-2c/final/verification-docs-check.txt
+A        evidence/phase-2c/final/verification-protected-files.txt
+A        evidence/phase-2c/final/verification-working-tree.txt
+A        evidence/phase-2c/final/verify-docs.py
+A force  evidence/phase-2c/mutation/M01.log
+A force  evidence/phase-2c/mutation/M02.log
+A force  evidence/phase-2c/mutation/M03.log
+A force  evidence/phase-2c/mutation/M04.log
+A force  evidence/phase-2c/mutation/M05.log
+A force  evidence/phase-2c/mutation/M06.log
+A force  evidence/phase-2c/mutation/M07-run1-timeout.log
+A force  evidence/phase-2c/mutation/M07-run2-timeout.log
+A force  evidence/phase-2c/mutation/M07.log
+A force  evidence/phase-2c/mutation/M08.log
+A force  evidence/phase-2c/mutation/M09.log
+A force  evidence/phase-2c/mutation/M10.log
+A force  evidence/phase-2c/mutation/M11.log
+A force  evidence/phase-2c/mutation/M12.log
+A force  evidence/phase-2c/mutation/M13-run1-equivalent.log
+A force  evidence/phase-2c/mutation/M13.log
+A        evidence/phase-2c/mutation/README.md
+A force  evidence/phase-2c/mutation/baseline-run1.log
+A force  evidence/phase-2c/mutation/baseline.log
+A        evidence/phase-2c/mutation/results-run1.json
+A        evidence/phase-2c/mutation/results-run2.json
+A        evidence/phase-2c/mutation/results-run3.json
+A        evidence/phase-2c/mutation/results.json
+A        evidence/phase-2c/mutation/run-mutations.ts
+A force  evidence/phase-2c/mutation/run.log
+A force  evidence/phase-2c/mutation/run1.log
+A force  evidence/phase-2c/mutation/run2.log
+A force  evidence/phase-2c/mutation/run3.log
+M        src/adapters/mock-buy/mock-settlement.ts
+M        src/authorization/authorization-service.ts
+A        src/authorization/policy-anchor.ts
+M        src/authorization/policy-state-file.ts
+M        src/authorization/policy-state.ts
+A        src/authorization/reservations.ts
+M        src/demo-isolated.ts
+A        src/durable/durable-file.ts
+A        src/durable/exclusive-lock.ts
+A        src/executor/execution-domain.ts
+M        src/executor/executor.ts
+A        src/executor/outcome-report.ts
+A        src/executor/outcome-reporter.ts
+M        src/executor/payment-journal.ts
+M        src/isolation/auth-main.ts
+M        src/isolation/config.ts
+A        src/isolation/executor-cli.ts
+M        src/isolation/executor-main.ts
+A        src/isolation/executor-state-admin.ts
+M        src/isolation/identity.ts
+M        src/isolation/journal-cli.ts
+M        src/isolation/launcher.ts
+M        src/isolation/policy-cli.ts
+M        src/isolation/policy-state-admin.ts
+A        src/isolation/settle-channel.ts
+A        tests/authorization/policy-anchor.test.ts
+A        tests/authorization/reservations.test.ts
+A        tests/executor/execution-domain.test.ts
+A        tests/executor/outcome-report.test.ts
+M        tests/executor/payment-journal.test.ts
+A        tests/isolation/financial-integrity.test.ts
+A        tests/isolation/identity-validation.test.ts
+M        tests/isolation/policy-state.test.ts
+A        tests/isolation/settle-probe.ts
+M        tests/isolation/source-integrity.test.ts
+M        tests/isolation/trusted-artifact.ts

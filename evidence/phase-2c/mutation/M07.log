@@ -1,0 +1,90 @@
+TAP version 13
+# Subtest: J3 single writer: a second open fails while the first holds the lock; released on close
+not ok 1 - J3 single writer: a second open fails while the first holds the lock; released on close
+  ---
+  duration_ms: 32.674393
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-vk8EjG/tests/executor/payment-journal.test.ts:68:1'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  operator: 'throws'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-vk8EjG/tests/executor/payment-journal.test.ts:74:10)
+    Test.runInAsyncScope (node:async_hooks:227:14)
+    Test.run (node:internal/test_runner/test:1402:25)
+    Test.start (node:internal/test_runner/test:1262:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+  ...
+# Subtest: FI-12/13 simultaneous executor startup: exactly one journal writer; the loser exits 75 before serving; a SIGKILLed holder's lock is released
+not ok 2 - FI-12/13 simultaneous executor startup: exactly one journal writer; the loser exits 75 before serving; a SIGKILLed holder's lock is released
+  ---
+  duration_ms: 18293.653075
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-vk8EjG/tests/isolation/financial-integrity.test.ts:679:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    0 !== 75
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 75
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-vk8EjG/tests/isolation/financial-integrity.test.ts:684:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+# Subtest: R3-F4a two auth processes starting at once: exactly one owns the writer lock
+not ok 3 - R3-F4a two auth processes starting at once: exactly one owns the writer lock
+  ---
+  duration_ms: 2763.299076
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-vk8EjG/tests/isolation/policy-state.test.ts:230:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    the loser never started: lock conflict
+    
+    78 !== 75
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 75
+  actual: 78
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-vk8EjG/tests/isolation/policy-state.test.ts:237:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+# Subtest: R3-F4b (2C, N1) an auth process that only has the lock file open never becomes a second writer
+not ok 4 - R3-F4b (2C, N1) an auth process that only has the lock file open never becomes a second writer
+  ---
+  duration_ms: 2742.632406
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-vk8EjG/tests/isolation/policy-state.test.ts:255:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"event":"refused","role":"auth","reason":"LOCK_HELD:/tmp/oxdeai-state-4F9ReR/policy/c96ab038c03d2e02d69f483e27c3e3b588fd08c5a788b36bc8f220e734aa24ca/writer.lock: not owned (status 75)"}
+    
+    
+    78 !== 75
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 75
+  actual: 78
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-vk8EjG/tests/isolation/policy-state.test.ts:260:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+  ...

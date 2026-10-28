@@ -1,0 +1,115 @@
+TAP version 13
+# Subtest: AN1 a completed chain: head is the latest DONE, nothing pending
+ok 1 - AN1 a completed chain: head is the latest DONE, nothing pending
+  ---
+  duration_ms: 2.50909
+  type: 'test'
+  ...
+# Subtest: AN2 the crash-state table, row by row
+ok 2 - AN2 the crash-state table, row by row
+  ---
+  duration_ms: 1.304948
+  type: 'test'
+  ...
+# Subtest: AN3 aborted versions never become completed (restore) sources
+ok 3 - AN3 aborted versions never become completed (restore) sources
+  ---
+  duration_ms: 0.516603
+  type: 'test'
+  ...
+# Subtest: AN4 tampering, reordering, truncation at the start, and protocol violations are detected
+not ok 4 - AN4 tampering, reordering, truncation at the start, and protocol violations are detected
+  ---
+  duration_ms: 2.601595
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-clgtEX/tests/authorization/policy-anchor.test.ts:58:1'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-clgtEX/tests/authorization/policy-anchor.test.ts:72:10)
+    Test.runInAsyncScope (node:async_hooks:227:14)
+    Test.run (node:internal/test_runner/test:1402:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+    Test.postRun (node:internal/test_runner/test:1542:19)
+    Test.run (node:internal/test_runner/test:1467:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+  ...
+# Subtest: AN5 a torn final line is tolerated only as the last line, until an ABORT names it
+ok 5 - AN5 a torn final line is tolerated only as the last line, until an ABORT names it
+  ---
+  duration_ms: 0.499889
+  type: 'test'
+  ...
+# Subtest: AN6 CX3: duplicate, stale, skipped, and bypassing PREPAREs are rejected
+not ok 6 - AN6 CX3: duplicate, stale, skipped, and bypassing PREPAREs are rejected
+  ---
+  duration_ms: 1.854909
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-clgtEX/tests/authorization/policy-anchor.test.ts:95:1'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  operator: 'throws'
+  stack: |-
+    corrupt (file:///tmp/oxdeai-mutant-clgtEX/tests/authorization/policy-anchor.test.ts:92:10)
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-clgtEX/tests/authorization/policy-anchor.test.ts:97:3)
+    Test.runInAsyncScope (node:async_hooks:227:14)
+    Test.run (node:internal/test_runner/test:1402:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+    Test.postRun (node:internal/test_runner/test:1542:19)
+    Test.run (node:internal/test_runner/test:1467:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+  ...
+# Subtest: AN7 CX3: malformed DONE and ABORT sequences are rejected
+ok 7 - AN7 CX3: malformed DONE and ABORT sequences are rejected
+  ---
+  duration_ms: 1.676905
+  type: 'test'
+  ...
+# Subtest: AN8 CX3: reconcile enforces the version rule itself, even on a hand-built log
+ok 8 - AN8 CX3: reconcile enforces the version rule itself, even on a hand-built log
+  ---
+  duration_ms: 0.814314
+  type: 'test'
+  ...
+# Subtest: AN9 valid crash recovery after PREPARE: abort, then retry of the same version, then complete
+ok 9 - AN9 valid crash recovery after PREPARE: abort, then retry of the same version, then complete
+  ---
+  duration_ms: 1.190838
+  type: 'test'
+  ...
+# Subtest: AN10 valid operator restoration: RESTORE for exactly head + 1, completed by its exact state
+not ok 10 - AN10 valid operator restoration: RESTORE for exactly head + 1, completed by its exact state
+  ---
+  duration_ms: 1.341647
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-clgtEX/tests/authorization/policy-anchor.test.ts:146:1'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  operator: 'throws'
+  stack: |-
+    corrupt (file:///tmp/oxdeai-mutant-clgtEX/tests/authorization/policy-anchor.test.ts:92:10)
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-clgtEX/tests/authorization/policy-anchor.test.ts:153:3)
+    Test.runInAsyncScope (node:async_hooks:227:14)
+    Test.run (node:internal/test_runner/test:1402:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+    Test.postRun (node:internal/test_runner/test:1542:19)
+    Test.run (node:internal/test_runner/test:1467:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 7
+# fail 3
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 156.37249

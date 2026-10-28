@@ -10,6 +10,13 @@
  *   F1  missing / corrupt / unreadable state fails closed; init happens once
  *   F2  a new deployment reuses the persistent budget of the same policy identity
  *   F4  one writer at a time, enforced by a kernel lock (flock), with crash recovery
+ *
+ * Phase 2C: the auth service takes the lock itself on its own descriptor
+ * (N1), so the contenders below are started as plain `node auth-main.ts`; the
+ * Phase 2B "unlocked contender refuses with 78" case is replaced by the
+ * stronger N1 case: a process that only has the lock file open is refused
+ * (75) while a writer runs. Outcome reports now also commit policy state, so
+ * F1b checks the budget and reservations instead of a bare version count.
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -21,7 +28,7 @@ import { after, before, test } from "node:test";
 import { commandAs, identitiesUnavailableReason } from "../../src/isolation/identity.ts";
 import type { IsolatedSystem } from "../../src/isolation/launcher.ts";
 import { initPolicyState, policyBinding, policyStateDir } from "../../src/isolation/policy-state-admin.ts";
-import { SERVICES } from "../../src/system.ts";
+import { AGENT_ID, SERVICES } from "../../src/system.ts";
 import { freshPolicyState, REPO_ROOT, removeStateRoot, trustedArtifact } from "./trusted-artifact.ts";
 
 const BLOCKED = identitiesUnavailableReason();
@@ -116,7 +123,9 @@ test("R3-F1b restart and crash with existing state preserve the budget", opts, a
   await sys.startAuth();
   assert.equal(await buy(sys), "DENY:BUDGET_EXCEEDED");
   assert.equal(sys.ledger().length, 2);
-  assert.equal(stateFile(sys).version, 2);
+  const st = stateFile(sys);
+  assert.deepEqual(st.state.budget.spent_in_period, { [AGENT_ID]: { $bigint: "20000" } }, "both payments still charged");
+  assert.deepEqual(Object.values(st.reservations as Record<string, { state: string }>).map((r) => r.state).sort(), ["CONFIRMED", "CONFIRMED"]);
 });
 
 for (const [name, damage, reason] of [
@@ -168,8 +177,9 @@ test("R3-F2b a different policy identity cannot reuse or reset the original budg
   const root = stateRoot("20000");
   const a = await launch(root);
   assert.equal(await buy(a), "ALLOW");
-  const original = spawnSync("sudo", ["-n", "cat", statePath(a)]).stdout;
   await a.stop();
+  // Snapshot after the deployment stopped (Phase 2C: its outcome report also commits state).
+  const original = spawnSync("sudo", ["-n", "cat", statePath(a)]).stdout;
 
   // Different policy identity (ttl is part of policy_id): it was never initialized,
   // so its state directory does not exist and the lock cannot even be taken
@@ -177,7 +187,7 @@ test("R3-F2b a different policy identity cannot reuse or reset the original budg
   const other = policyBinding({ ttlSeconds: 30 });
   assert.notEqual(other.policyId, policyBinding().policyId);
   const otherDir = policyStateDir(root, other);
-  await assert.rejects(launch(root, { ttlSeconds: 30 }), /auth exited during startup \(code 66\).*writer\.lock: No such file or directory/);
+  await assert.rejects(launch(root, { ttlSeconds: 30 }), /auth exited during startup \(code 66\).*writer\.lock: ENOENT/);
   assert.notEqual(sudo(["test", "-e", otherDir]), 0, "no state was created for the other identity");
 
   // Operator mistake: the original state copied into the other identity's directory.
@@ -194,10 +204,14 @@ test("R3-F2b a different policy identity cannot reuse or reset the original budg
 
 // ── F4: single writer, kernel lock, crash recovery ────────────────────────
 
-/** Start an extra auth instance as the auth identity; resolve on ready or exit. */
-function contender(sys: IsolatedSystem, withLock = true): Promise<{ ready: boolean; pid?: number; code?: number | null; out: string }> {
+/**
+ * Start an extra auth instance as the auth identity; resolve on ready or exit.
+ * "plain": as the launcher starts it (it takes the lock itself);
+ * "open-fd": it first opens the lock file WITHOUT locking it (the N1 attack).
+ */
+function contender(sys: IsolatedSystem, mode: "plain" | "open-fd" = "plain"): Promise<{ ready: boolean; pid?: number; code?: number | null; out: string }> {
   const main = [NODE, join(sys.paths.apps.auth, "src", "isolation", "auth-main.ts"), sys.paths.authConfig];
-  const argv = withLock ? ["/usr/bin/flock", "--nonblock", "--conflict-exit-code", "75", sys.paths.writerLock, ...main] : main;
+  const argv = mode === "plain" ? main : ["/bin/bash", "-c", `exec 9<'${sys.paths.writerLock}'; exec "$@"`, "contender", ...main];
   const [cmd, args] = commandAs("auth", argv);
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -220,13 +234,15 @@ test("R3-F4a two auth processes starting at once: exactly one owns the writer lo
   const winners = [x, y].filter((c) => c.ready);
   const losers = [x, y].filter((c) => !c.ready);
   assert.equal(winners.length, 1, JSON.stringify([x, y]));
-  assert.equal(losers[0]!.code, 75, "the loser never started: flock conflict");
+  assert.equal(losers[0]!.code, 75, "the loser never started: lock conflict");
+  assert.match(losers[0]!.out, /POLICY_STATE_LOCKED/);
 
-  // While the winner runs, a third instance is refused too, with or without flock.
+  // While the winner runs, a third instance is refused too, including one that
+  // already has the lock file open (N1: an open descriptor is not ownership).
   assert.equal((await contender(sys)).code, 75);
-  const unlocked = await contender(sys, false);
-  assert.equal(unlocked.code, 78);
-  assert.match(unlocked.out, /POLICY_STATE_LOCK_NOT_HELD/);
+  const openFd = await contender(sys, "open-fd");
+  assert.equal(openFd.code, 75, openFd.out);
+  assert.match(openFd.out, /POLICY_STATE_LOCKED/);
 
   // The winner serves authorizations; then it is killed and a normal start recovers at once.
   assert.equal(await authorizeAsGateway(sys), "ALLOW");
@@ -236,14 +252,20 @@ test("R3-F4a two auth processes starting at once: exactly one owns the writer lo
   assert.equal(await authorizeAsGateway(sys), "ALLOW");
 });
 
-test("R3-F4b an auth process without the lock refuses, even when no other writer is running", opts, async () => {
+test("R3-F4b (2C, N1) an auth process that only has the lock file open never becomes a second writer", opts, async () => {
   const sys = await launch(stateRoot("50000"));
+  // Running writer + open-descriptor contender: refused before touching state.
+  const versionBefore = stateFile(sys).version;
+  const openFd = await contender(sys, "open-fd");
+  assert.equal(openFd.code, 75, openFd.out);
+  assert.equal(stateFile(sys).version, versionBefore, "no state change by the refused process");
+  assert.equal(await authorizeAsGateway(sys), "ALLOW", "the real writer still serves");
+  // No writer running: the same process takes the lock itself and is then the only writer.
   await sys.stopAuth();
-  const unlocked = await contender(sys, false);
-  assert.equal(unlocked.code, 78);
-  assert.match(unlocked.out, /POLICY_STATE_LOCK_NOT_HELD/);
-  await sys.startAuth();
-  assert.equal(await authorizeAsGateway(sys), "ALLOW");
+  const sole = await contender(sys, "open-fd");
+  assert.equal(sole.ready, true, sole.out);
+  assert.equal((await contender(sys)).code, 75, "and nobody else can join it");
+  assert.equal(sudo(["kill", "-KILL", String(sole.pid)]), 0);
 });
 
 test("R3-F4c crash during contention: after SIGKILL, still at most one writer", opts, async () => {
@@ -261,7 +283,7 @@ test("R3-F4d lock cannot be taken (lock file unopenable): auth refuses, no autho
   const ledger = sys.ledger().length;
   await sys.stopAuth();
   assert.equal(sudo(["chmod", "000", sys.paths.writerLock]), 0);
-  await assert.rejects(sys.startAuth(), /auth exited during startup \(code 66\).*writer\.lock: Permission denied/);
+  await assert.rejects(sys.startAuth(), /auth exited during startup \(code 66\).*writer\.lock: EACCES/);
   assert.equal(await buy(sys), "DENY:PDP_UNAVAILABLE");
   assert.equal(sys.ledger().length, ledger);
   assert.equal(sudo(["chmod", "644", sys.paths.writerLock]), 0);

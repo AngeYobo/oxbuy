@@ -1,0 +1,5 @@
+fi07b-alone-run1 exit=0
+fi07b-alone-run2 exit=0
+fi07b-alone-run3 exit=0
+typecheck exit=0
+full-suite exit=0

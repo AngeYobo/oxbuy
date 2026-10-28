@@ -1,0 +1,79 @@
+# Phase 2C checkpoint: SHA-256 of every src/ and tests/ file in the commit
+# Generated 2026-10-28T15:20:41Z from the working tree, base HEAD a2b85c1.
+#
+# Columns: sha256  vs_base  history  mtime_utc  path
+#  sha256   current-file integrity: the content committed in the checkpoint.
+#  vs_base  A = added, M = modified, = = unchanged relative to a2b85c1.
+#  history  correspondence with the final validation run
+#           (fi07b-remediation/full-suite.tap, 2026-10-28 14:20:23 UTC):
+#           HASH  = equals the hash recorded in fi07b-remediation/sha256.txt
+#                   at 14:12:03 UTC, before the run; mtime also before the run.
+#           MTIME = not in that record; only the file modification time
+#                   (before the run) links it to the run. Weaker evidence:
+#                   mtimes can be set arbitrarily.
+#  A failing entry would read MISMATCH or AFTER-RUN; there are none.
+#
+01113df5d6c0f8abc7f845c3cb2dd539dd1b98dabc57373ab01400851fcdb59c  =  MTIME  2026-10-28T09:48:00Z  src/adapters/celo-buy/celo-buy.ts
+7bfd91f3aa1ab38a6d5c3154f63834937dc18ed17cf2b6d024eb802b81e13356  =  MTIME  2026-10-27T16:54:36Z  src/adapters/mock-buy/mock-buy.ts
+4b4759e47eb6b7f2e8b054cd829730a2e830e122b3989ecef33965081983db0c  M  MTIME  2026-10-28T10:39:05Z  src/adapters/mock-buy/mock-settlement.ts
+33588653efae2473bf37b35d115be03085fef5f73572bd3ac6c711160e8a93c9  =  MTIME  2026-10-27T16:53:16Z  src/agent/agent.ts
+d019552ab3e96ee8d0901b9e75af9e0de91a513d19b2ff84ccfaa8ac10af34a2  =  MTIME  2026-10-27T15:27:36Z  src/agent/purchase-request.ts
+50573c43bf50489dd30319e0defbf1f89facf8e1b80dbda8f6af571749b88eda  =  MTIME  2026-10-28T09:48:00Z  src/agent/remote-client.ts
+7e75056c9f35456c08310e31f27d9e1644c5b8db72247bdcc2c087ae35681011  M  HASH   2026-10-28T11:01:00Z  src/authorization/authorization-service.ts
+a385095ffc53dc0037f3d2b27cee16bb307bf4b913db0b5f904ad3e2b983b071  =  HASH   2026-10-27T15:32:39Z  src/authorization/intent.ts
+622e017775ba0b0b1f95146932172d034ed7afb696b5a9b64c001f380817a6a7  A  HASH   2026-10-28T11:42:03Z  src/authorization/policy-anchor.ts
+cc76c5b43c828d06f49bb19dfb7cadaeef9a47b4f3f9db521b6128d03bfde398  M  HASH   2026-10-28T11:11:14Z  src/authorization/policy-state-file.ts
+7d846726b7b5694b30fad1ebe1b379c36620e4e2ff5a01a6c91ced4d31d32773  M  HASH   2026-10-28T10:32:20Z  src/authorization/policy-state.ts
+329b9f9b0eb11354458862aca613a78ff5f433cf9bfc3d0c35fa4f85d3a7c2c7  A  HASH   2026-10-28T11:01:00Z  src/authorization/reservations.ts
+68adda8c84aa27fdd047479b7f3813f7e37ebdae3518dc921f2105279480dc09  M  MTIME  2026-10-28T12:42:43Z  src/demo-isolated.ts
+6e2440fbe223b7876241dd53b98444fb884d39d96d102827bb8aa6f5a47ad6d7  =  MTIME  2026-10-27T16:53:46Z  src/demo.ts
+ee6c0efe7795c8868bd75076e9e419d6d65cd3fc69a6f1a67790cf4c5f0f0df5  A  MTIME  2026-10-28T10:59:14Z  src/durable/durable-file.ts
+abd4d121970615d6c1f9a0b94d0f94bdf5c0446f1b1d5cf4f5b28c2e987a71c7  A  MTIME  2026-10-28T10:33:53Z  src/durable/exclusive-lock.ts
+827b91ff3adc165c2cbf29e7a567663a15648dd2f6493389a7ecd8b519a26bc3  A  HASH   2026-10-28T11:00:29Z  src/executor/execution-domain.ts
+403df5a97656746a7fcb7b76981319e3034be114d0ae0191185c809f86adcb37  M  HASH   2026-10-28T10:34:27Z  src/executor/executor.ts
+5b625dc00c5294c574b6938ff1b54281dbbc5ae2fa5f7b67472477bbce4ffdf8  A  HASH   2026-10-28T11:01:00Z  src/executor/outcome-report.ts
+3c3ee17f6746e490f262d6a9813aab6da68d2f771a53f437edebac9deb402291  A  HASH   2026-10-28T11:01:00Z  src/executor/outcome-reporter.ts
+0fb8d6a12fce397543406b3038ea3825d3f6f206ac39dc48a38fe70df98f2e2e  =  HASH   2026-10-27T16:51:35Z  src/executor/payment-adapter.ts
+ee717693c9507e04d754a9cf11b3211faa56c160906a4fe34d03b6bfa9188616  M  HASH   2026-10-28T11:01:00Z  src/executor/payment-journal.ts
+542b38057f503f2c9d55cd4845680a65bce246db455534821750faf8d26f8f8e  =  MTIME  2026-10-28T09:48:00Z  src/gateway/gateway.ts
+2bb41c38a91f442e4cc92e8ff0f8ccb49245c8c9e2b60168a8de599e560464af  =  HASH   2026-10-28T09:48:00Z  src/isolation/agent-main.ts
+5457bf627481bc9665d27af6455f9fce6fc8ffaa278440db3cb4009f22864044  =  HASH   2026-10-28T09:48:00Z  src/isolation/artifact.ts
+45d380a9503b0e13fe8addacdf94c872c1fd5105b657c8588ddc7aa6443568c5  M  HASH   2026-10-28T11:11:14Z  src/isolation/auth-main.ts
+2d2408d54884cf269cc7ad53b5e3ed88be0c53acd5b51bd1ac55ae07f9765522  M  HASH   2026-10-28T11:11:14Z  src/isolation/config.ts
+f317a3c2ff814a3059e8e24caa5faf655b92794f76be9b0fb1e49e1295da3752  A  HASH   2026-10-28T12:42:29Z  src/isolation/executor-cli.ts
+feb67ddf19a68124ca39a0374566aa5fed985d5bb5b20d145a7d77c5e7bf1986  M  HASH   2026-10-28T11:01:25Z  src/isolation/executor-main.ts
+2fdd99f157e4c9e9adedaa2ab51c8353d0c9b5c9add0c68e8b07069ef55261ba  A  HASH   2026-10-28T10:39:05Z  src/isolation/executor-state-admin.ts
+0084d1e883db8cf5cd5ae0def0f630c5004af5a5951c5d6d13018f70e88a4bed  =  HASH   2026-10-28T09:48:00Z  src/isolation/gateway-main.ts
+73264aff066b9dc46ee18034827385933dfc508fa0bff5a06efeb12be74ec48b  M  HASH   2026-10-28T10:36:50Z  src/isolation/identity.ts
+b5f6dca20ebe54ded81f8563cc3f04529fb147af6583a431ed6716249ba55225  =  HASH   2026-10-28T09:48:00Z  src/isolation/ipc-cli.ts
+5e3d615ebb8a6f091f1219440bd340ce50bea6139b6cd6acdbca9fd015a4823c  =  HASH   2026-10-28T09:48:00Z  src/isolation/ipc.ts
+74d77d2f657d82704e6d7b011f981f73bdc175ac1022d2830851c4735c27ca2d  M  HASH   2026-10-28T11:11:14Z  src/isolation/journal-cli.ts
+29b9c6ab5acced0781d4b6dd565383380b439703c647798abbd8684046345188  M  HASH   2026-10-28T11:11:14Z  src/isolation/launcher.ts
+2de4031601bbdaf254f789af9df1fd4de7d5cd6f519b22cc02e66e177df94d18  M  HASH   2026-10-28T12:44:17Z  src/isolation/policy-cli.ts
+7e227dea24a1794ce0dfc0989d392048dbd8deaa495e178803d4f3f6febb5f61  M  HASH   2026-10-28T11:00:02Z  src/isolation/policy-state-admin.ts
+e133bf652e181a13e75623a5a72168abd874ee0c330ddf181fcb2a603665d420  A  HASH   2026-10-28T10:35:02Z  src/isolation/settle-channel.ts
+dade31881ed45c2df51cbee66fcd33a0d2416c59f6726b6236a915832d748895  =  HASH   2026-10-28T09:48:00Z  src/isolation/trust-cli.ts
+6ea76a8eb40b349cb1506d31c1c38f97ccc241d6e98e9fd9fbeaa93e68223e68  =  HASH   2026-10-28T09:48:00Z  src/isolation/trusted-entry.ts
+2a7e7e1d479d8da25ceef66bb1a0558212282f2476b7d0a0e906cd85ef7145f5  =  MTIME  2026-10-28T09:48:00Z  src/system.ts
+8be363feb8d51d6f47ecfb3882fa680917a89024deb02f2645f0684e4e19e48c  =  MTIME  2026-10-27T16:55:18Z  tests/authorization/allowlist.test.ts
+6949bf5efa3707a99bfc02056960989a733b75eaf30b4313a294ff1adfd5fb25  A  MTIME  2026-10-28T11:50:23Z  tests/authorization/policy-anchor.test.ts
+f068113399d66b0d32123365dcf8221de21b6bc27e01d959ecc8298af156a836  =  MTIME  2026-10-27T15:32:30Z  tests/authorization/policy.test.ts
+f0d7b7feaafa88a16f9162e2b2aad83f5806d88d2c93b38a9f355e13f9862e93  A  MTIME  2026-10-28T11:33:38Z  tests/authorization/reservations.test.ts
+2d7591bb0b4ff748a40be7d6953979412561edb9d0ed767a9757938ecc60cfa4  A  MTIME  2026-10-28T11:13:54Z  tests/executor/execution-domain.test.ts
+d610182a2fd3589df424b77ebeb556c28b3386a497c0d50060a0358e2404f3cf  A  MTIME  2026-10-28T11:34:00Z  tests/executor/outcome-report.test.ts
+d89d56d0fc72ee505289540b755884374fd54b32f28facea7e7953cc3614097b  M  MTIME  2026-10-28T10:40:31Z  tests/executor/payment-journal.test.ts
+aed062c1b60fe3fc377d548eb9b755ad2bc253cf8339006540f1b1b9530a5140  =  MTIME  2026-10-27T15:30:31Z  tests/helpers.ts
+cf87c24584b2337ab4d6b52a382ceb02d50127c81a0ab2b5602ac01d62972bba  =  MTIME  2026-10-27T15:31:38Z  tests/integration/allow.test.ts
+cd01b66ee96c0d18b66af92c9d26b892be4a8caa3fa97165fb678e3e3ffc10e0  =  MTIME  2026-10-28T09:48:00Z  tests/isolation/agent-probe.ts
+3abbf61799f2d992a1a0d50a4f21eb12343d91e8bbbfa35b004ce8b1446b1280  A  HASH   2026-10-28T14:11:50Z  tests/isolation/financial-integrity.test.ts
+8494b96e03eae1cb4311608a1510be89e21684214bd16a9ffd523bc204b1b1f9  A  MTIME  2026-10-28T11:42:03Z  tests/isolation/identity-validation.test.ts
+b8822257b221061076194293c51eb22135feeeed9f2b06f906c364c79bdb1bea  M  MTIME  2026-10-28T10:44:42Z  tests/isolation/policy-state.test.ts
+d7a8e73703ba5c77b78021e29540bfa4bb5d5072d90765e4e3475fde83b5bc9f  =  MTIME  2026-10-28T09:48:00Z  tests/isolation/process-isolation.test.ts
+40ec32c5161ca52d7304aced34946c994e6d0204928616a70ce04b2380798ad0  A  MTIME  2026-10-28T11:13:01Z  tests/isolation/settle-probe.ts
+4f1e062786b914aa2ff082587dde2325acab2b1971a039073591ad804bb2d13c  M  MTIME  2026-10-28T10:42:20Z  tests/isolation/source-integrity.test.ts
+d75c5dbd7fe26200b8255a0217f403d05e60976b4f488cbc895e5c20a59912a1  M  MTIME  2026-10-28T10:40:15Z  tests/isolation/trusted-artifact.ts
+b2cf448aa267617792ea92dd50bf0a898e6107e741105ccf2ed782ef1e07f92b  =  MTIME  2026-10-27T15:32:30Z  tests/security/artifact.test.ts
+66c1c5810ef05d14d7e7d49efc024b0e30802018ffcb8e2f6e4c8e3ce7014f55  =  MTIME  2026-10-27T15:31:54Z  tests/security/bypass.test.ts
+47a7393f727323394c603014464a4bc5a91a45e2a8a18cc483456da8f784afd2  =  MTIME  2026-10-27T16:54:37Z  tests/security/payment-binding.test.ts
+b2fa75f0ef57087f6395a6f0c47d681b39abcc33e230d821f2f8336c6f98be4f  =  MTIME  2026-10-28T09:48:00Z  tests/security/payment-outcome.test.ts
+d6b8fa4d9cbcf84f35668b6a32e5acde3349df6ba76dc90bb459c8c235ccec39  =  MTIME  2026-10-27T15:31:40Z  tests/security/tamper.test.ts

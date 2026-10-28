@@ -1,0 +1,252 @@
+[
+  {
+    "id": "BASELINE",
+    "status": 0,
+    "tests": 54,
+    "pass": 54,
+    "fail": 0,
+    "verdict": "PASS"
+  },
+  {
+    "id": "M01",
+    "protects": "CX3 anchor: strict PREPARE version progression in parseAnchor",
+    "files": [
+      "src/authorization/policy-anchor.ts"
+    ],
+    "tests": [
+      "tests/authorization/policy-anchor.test.ts"
+    ],
+    "pattern": "^AN",
+    "ran": 10,
+    "fail": 3,
+    "failing": [
+      "AN4 tampering, reordering, truncation at the start, and protocol violations are detected",
+      "AN6 CX3: duplicate, stale, skipped, and bypassing PREPAREs are rejected",
+      "AN10 valid operator restoration: RESTORE for exactly head + 1, completed by its exact state"
+    ],
+    "verdict": "KILLED"
+  },
+  {
+    "id": "M02",
+    "protects": "CX1 / N3: a state one commit older than the anchor head is a rollback (reintroduces the original CX1 acceptance)",
+    "files": [
+      "src/authorization/policy-anchor.ts"
+    ],
+    "tests": [
+      "tests/authorization/policy-anchor.test.ts",
+      "tests/isolation/financial-integrity.test.ts"
+    ],
+    "pattern": "^(AN2|CX1a)",
+    "ran": 2,
+    "fail": 2,
+    "failing": [
+      "AN2 the crash-state table, row by row",
+      "CX1a regression: the state from one commit earlier (after a completed DONE) is refused at startup and while running"
+    ],
+    "verdict": "KILLED"
+  },
+  {
+    "id": "M03",
+    "protects": "F3: an UNCERTAIN outcome is held, never released automatically",
+    "files": [
+      "src/authorization/reservations.ts"
+    ],
+    "tests": [
+      "tests/authorization/reservations.test.ts",
+      "tests/isolation/financial-integrity.test.ts"
+    ],
+    "pattern": "^(RS|FI-04)",
+    "ran": 9,
+    "fail": 3,
+    "failing": [
+      "RS2 allowed transitions and the amount released by each",
+      "FI-04/08 crash after the payment started (crashBeforePay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it",
+      "FI-04/08 crash after the payment started (crashAfterPay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it"
+    ],
+    "verdict": "KILLED"
+  },
+  {
+    "id": "M04",
+    "protects": "F3: a STARTED payment not in flight is UNCERTAIN, never NOT_EXECUTED",
+    "files": [
+      "src/executor/outcome-report.ts"
+    ],
+    "tests": [
+      "tests/executor/outcome-report.test.ts",
+      "tests/isolation/financial-integrity.test.ts"
+    ],
+    "pattern": "^(OR|FI-04)",
+    "ran": 7,
+    "fail": 3,
+    "failing": [
+      "OR3 derivation: NOT_EXECUTED only when the journal proves `pay` did not (successfully) run",
+      "FI-04/08 crash after the payment started (crashBeforePay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it",
+      "FI-04/08 crash after the payment started (crashAfterPay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it"
+    ],
+    "verdict": "KILLED"
+  },
+  {
+    "id": "M05",
+    "protects": "CX2: only the reservation's own execution domain may cancel or release it (reintroduces CX2)",
+    "files": [
+      "src/authorization/authorization-service.ts"
+    ],
+    "tests": [
+      "tests/executor/outcome-report.test.ts",
+      "tests/isolation/financial-integrity.test.ts"
+    ],
+    "pattern": "^(OR5|CX2a|CX2b)",
+    "ran": 3,
+    "fail": 2,
+    "failing": [
+      "CX2a regression: a new deployment on another journal never releases a reservation an older executor is still paying",
+      "CX2b across three journals: an earlier deployment's authorization cannot execute elsewhere and is reconciled only by its own journal"
+    ],
+    "verdict": "KILLED"
+  },
+  {
+    "id": "M06",
+    "protects": "CX2: reports from a journal that is not the current execution domain are refused",
+    "files": [
+      "src/authorization/authorization-service.ts"
+    ],
+    "tests": [
+      "tests/executor/outcome-report.test.ts",
+      "tests/isolation/financial-integrity.test.ts"
+    ],
+    "pattern": "^(OR5|CX2d)",
+    "ran": 2,
+    "fail": 2,
+    "failing": [
+      "OR5 settle: the reporting journal must be the current domain and the reservation's domain; duplicates never release twice",
+      "CX2d forged, foreign-domain, unknown, out-of-binding, and unproven reports never move budget"
+    ],
+    "verdict": "KILLED"
+  },
+  {
+    "id": "M07",
+    "protects": "B6 / N1: a failed flock is not ownership (an open descriptor is not a lock)",
+    "files": [
+      "src/durable/exclusive-lock.ts"
+    ],
+    "tests": [
+      "tests/executor/payment-journal.test.ts",
+      "tests/isolation/policy-state.test.ts",
+      "tests/isolation/financial-integrity.test.ts"
+    ],
+    "pattern": "^(J3|R3-F4a|R3-F4b|FI-12)",
+    "ran": null,
+    "fail": null,
+    "failing": [
+      "J3 single writer: a second open fails while the first holds the lock; released on close",
+      "FI-12/13 simultaneous executor startup: exactly one journal writer; the loser exits 75 before serving; a SIGKILLed holder's lock is released",
+      "R3-F4a two auth processes starting at once: exactly one owns the writer lock",
+      "R3-F4b (2C, N1) an auth process that only has the lock file open never becomes a second writer"
+    ],
+    "verdict": "SURVIVED"
+  },
+  {
+    "id": "M08",
+    "protects": "N2: a consumed auth_id is refused forever in the journal (AUTH_REPLAY)",
+    "files": [
+      "src/executor/payment-journal.ts"
+    ],
+    "tests": [
+      "tests/executor/payment-journal.test.ts"
+    ],
+    "pattern": "^J",
+    "ran": 10,
+    "fail": 1,
+    "failing": [
+      "J2 an auth_id is consumed durably: reusing it for another intent is AUTH_REPLAY, also after reopen"
+    ],
+    "verdict": "KILLED"
+  },
+  {
+    "id": "M09",
+    "protects": "N2: an unreadable journal record is UNKNOWN, never absent",
+    "files": [
+      "src/executor/payment-journal.ts"
+    ],
+    "tests": [
+      "tests/executor/payment-journal.test.ts",
+      "tests/isolation/financial-integrity.test.ts"
+    ],
+    "pattern": "^(J7|FI-09)",
+    "ran": 2,
+    "fail": 2,
+    "failing": [
+      "J7 an unreadable record is reported UNKNOWN, never as absent",
+      "FI-09 journal corruption and truncation: damaged structure refuses to start; damaged records are never released, never re-paid"
+    ],
+    "verdict": "KILLED"
+  },
+  {
+    "id": "M10",
+    "protects": "N3: the auth service refuses to start (or load) on a REFUSE from the anchor reconciliation",
+    "files": [
+      "src/authorization/policy-state-file.ts"
+    ],
+    "tests": [
+      "tests/isolation/financial-integrity.test.ts"
+    ],
+    "pattern": "^CX1a",
+    "ran": 1,
+    "fail": 1,
+    "failing": [
+      "CX1a regression: the state from one commit earlier (after a completed DONE) is refused at startup and while running"
+    ],
+    "verdict": "KILLED"
+  },
+  {
+    "id": "M11",
+    "protects": "F5: unsafe identity configurations are rejected",
+    "files": [
+      "src/isolation/identity.ts"
+    ],
+    "tests": [
+      "tests/isolation/identity-validation.test.ts"
+    ],
+    "pattern": "^ID",
+    "ran": 4,
+    "fail": 1,
+    "failing": [
+      "ID2 unsafe synthetic configurations are rejected"
+    ],
+    "verdict": "KILLED"
+  },
+  {
+    "id": "M12",
+    "protects": "F3 / R-F1: the executor refuses a live quote above the authorized maximum before signing",
+    "files": [
+      "src/executor/executor.ts"
+    ],
+    "tests": [
+      "tests/security/payment-binding.test.ts",
+      "tests/isolation/financial-integrity.test.ts"
+    ],
+    "pattern": "^(T3c|R-F1a|FI-02)",
+    "ran": 6,
+    "fail": 1,
+    "failing": [
+      "FI-02 payment rejected before execution (quoteDrift): no payment; released by its own domain; the authorization can never pay"
+    ],
+    "verdict": "KILLED"
+  },
+  {
+    "id": "M13",
+    "protects": "Phase 2B: the executor verifies the authorization signature itself",
+    "files": [
+      "src/executor/executor.ts"
+    ],
+    "tests": [
+      "tests/security/tamper.test.ts",
+      "tests/isolation/process-isolation.test.ts"
+    ],
+    "pattern": "^(T7|P2A-13)",
+    "ran": 2,
+    "fail": 0,
+    "failing": [],
+    "verdict": "SURVIVED"
+  }
+]

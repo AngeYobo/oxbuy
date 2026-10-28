@@ -5,8 +5,15 @@
  * Runs as the executor's OS identity (oxdeai-executor). Listens only on a
  * Unix-domain socket in exec-ipc/ (setgid directory executor:gateway 2750,
  * socket 0660), so only the gateway identity can connect. Holds the internal
- * executor token, the mock wallet key, the mock ledger, and the durable
- * payment journal; never the authorization signing key.
+ * executor token, the mock wallet key, the mock ledger, the durable payment
+ * journal, and the outcome-report signing key; never the authorization
+ * signing key.
+ *
+ * Phase 2C: the journal and ledger are persistent and operator-initialized
+ * (<executorStateRoot>); a missing or damaged journal makes the executor
+ * refuse to start (exit 78), and a journal held by another process exit 75.
+ * Outcome reports go to the auth service over the settle channel
+ * (src/isolation/settle-channel.ts, src/executor/outcome-reporter.ts).
  *
  *   node executor-main.ts <executor-config.json>
  */
@@ -14,16 +21,23 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { createMockBuyAdapter } from "../adapters/mock-buy/mock-buy.ts";
 import { withMockSettlement } from "../adapters/mock-buy/mock-settlement.ts";
 import { createPaymentExecutor } from "../executor/executor.ts";
-import type { PaymentAdapter } from "../executor/payment-adapter.ts";
-import { openFilePaymentJournal } from "../executor/payment-journal.ts";
+import { domainAudience } from "../executor/execution-domain.ts";
+import { createOutcomeReporter } from "../executor/outcome-reporter.ts";
+import { PaymentRefusedError, type PaymentAdapter } from "../executor/payment-adapter.ts";
+import { openFilePaymentJournal, type FilePaymentJournal } from "../executor/payment-journal.ts";
 import { emit, readConfig, type ExecutorConfig, type ExecutorFaults } from "./config.ts";
 import { serveJson } from "./ipc.ts";
+import { settlePost } from "./settle-channel.ts";
 
 function withFaults(inner: PaymentAdapter, faults: ExecutorFaults): PaymentAdapter {
   return {
-    quote: (r) => inner.quote(r),
+    async quote(r) {
+      const q = await inner.quote(r);
+      return faults.quoteDrift ? { ...q, amount: (BigInt(q.amount) * 10n).toString() } : q;
+    },
     async pay(payment) {
       if (faults.delayPayMs) await sleep(faults.delayPayMs);
+      if (faults.refuseBeforeSigning) throw new PaymentRefusedError("MOCK_REFUSED_BEFORE_SIGNING");
       if (faults.crashBeforePay) process.kill(process.pid, "SIGKILL");
       const receipt = await inner.pay(payment);
       if (faults.crashAfterPay) process.kill(process.pid, "SIGKILL");
@@ -34,10 +48,33 @@ function withFaults(inner: PaymentAdapter, faults: ExecutorFaults): PaymentAdapt
 
 const config = readConfig<ExecutorConfig>(process.argv[2]);
 process.umask(0o077);
+const faults = config.faults ?? {};
 
-const journal = openFilePaymentJournal(config.journalDir);
+function refuse(code: number, reason: string): never {
+  process.stderr.write(`${JSON.stringify({ event: "refused", role: "executor", reason })}\n`);
+  process.exit(code);
+}
+
+let journal: FilePaymentJournal;
+try {
+  journal = openFilePaymentJournal(config.journalDir, {
+    // Fault: crash between consuming the auth_id and creating the intent record.
+    afterAuthRecord: faults.crashAfterAuthRecord ? () => process.kill(process.pid, "SIGKILL") : undefined,
+  });
+} catch (err) {
+  const msg = (err as Error).message;
+  refuse(msg.startsWith("JOURNAL_LOCKED") ? 75 : 78, msg);
+}
+// CX2: verify the execution-domain binding from this process's own uid and open journal.
+{
+  const d = { journal_id: journal.journalId, executor_uid: process.getuid!() };
+  if (journal.journalId !== config.domain.journal_id || d.executor_uid !== config.domain.executor_uid) {
+    refuse(78, `EXECUTION_DOMAIN_MISMATCH:journal ${journal.journalId} uid ${d.executor_uid}`);
+  }
+  if (config.verification.expectedAudience !== domainAudience(config.domain.baseAudience, d)) refuse(78, "EXECUTION_DOMAIN_MISMATCH:audience");
+}
 const mock = createMockBuyAdapter(config.services.map((s) => ({ ...s, price: BigInt(s.price) })));
-const adapter = withFaults(withMockSettlement(mock.adapter, config), config.faults ?? {});
+const adapter = withFaults(withMockSettlement(mock.adapter, config), faults);
 const executor = createPaymentExecutor({
   internalToken: config.internalToken,
   adapter,
@@ -45,10 +82,24 @@ const executor = createPaymentExecutor({
   journal,
 });
 
-const delay = config.faults?.delayResponseMs ?? 0;
+const reporter = createOutcomeReporter({
+  journal,
+  key: config.reportKey,
+  inFlight: executor.inFlight,
+  graceSeconds: config.cancelGraceSeconds,
+  faults: { crashBeforeAck: faults.crashBeforeAck },
+  transport: {
+    settle: (signed) => settlePost(config.settleSocketPath, config.proofDir, "/v1/settle", { report: signed }),
+    expired: (graceSeconds) => settlePost(config.settleSocketPath, config.proofDir, "/v1/settle/expired", { grace_seconds: graceSeconds }),
+  },
+  log: emit,
+});
+
+const delay = faults.delayResponseMs ?? 0;
 const server = await serveJson(config.socketPath, 0o660, {
   "/v1/execute": async (body, headers) => {
     const res = await executor.handle(body, headers);
+    void reporter.run();
     if (delay) await sleep(delay);
     return { status: res.status, body: res.body };
   },
@@ -59,9 +110,13 @@ const server = await serveJson(config.socketPath, 0o660, {
 });
 
 for (const r of journal.needsReconciliation) emit({ event: "needs_reconciliation", intent_hash: r.intent_hash, state: r.state });
-emit({ event: "ready", role: "executor", pid: process.pid, stale_lock_recovered: journal.staleLockRecovered });
+emit({ event: "ready", role: "executor", pid: process.pid });
+
+void reporter.run();
+const timer = setInterval(() => void reporter.run(), config.reconcileIntervalMs);
 
 function shutdown() {
+  clearInterval(timer);
   server.close(() => {
     journal.close();
     process.exit(0);

@@ -1,4 +1,8 @@
-# Conformance: Phase 1, 1R, 2A, 2A-R, 2B, 2B-R3, and the 2B-R4 audit
+# Conformance: Phase 1, 1R, 2A, 2A-R, 2B, 2B-R3, the 2B-R4 audit, and Phase 2C
+
+> **Phase 2C:** the current results, a requirement-by-requirement matrix, and
+> the final test counts are in "Phase 2C" below. The summary that follows
+> records the Phase 2B / 2B-R3 / R5 runs as they were.
 
 Results are from `npm run test:evidence` on 2026-10-27 (Node.js v24.21.0,
 `@oxdeai/core@2.0.2`, `@oxdeai/guard@2.0.3`), run on the Phase 2B / 2B-R3
@@ -436,6 +440,247 @@ is.
 - **Verdict:** CONDITIONAL GO, mock only, conditional on the documentation
   corrections made in Phase 2B-R5. Real-payment readiness: NO.
 
+## Phase 2C: financial integrity, durable state, recovery (mock only)
+
+Branch `feat/phase-2c-financial-integrity`, base `a2b85c1` (`main` and
+`origin/main` at the same commit), uncommitted working tree, 2026-10-28,
+Node.js v24.21.0, `@oxdeai/core@2.0.2`, `@oxdeai/guard@2.0.3`. Design:
+`docs/FINANCIAL-INTEGRITY.md`. Evidence index: `evidence/phase-2c/MANIFEST.md`.
+
+### Final validation
+
+| Check | Command | Exit | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| Full suite | `node --test "tests/**/*.test.ts"` (`npm test`) | 0 | **184 tests, 184 pass**, 0 fail, 0 cancelled, 0 skipped, 0 todo | `evidence/phase-2c/fi07b-remediation/full-suite.tap`, `full-suite.txt` |
+| Typecheck | `npx tsc -p tsconfig.json` | 0 | clean | `evidence/phase-2c/fi07b-remediation/typecheck.log` |
+| FI-07b alone | `node --test --test-name-pattern='^FI-07b' tests/isolation/financial-integrity.test.ts`, 3 runs | 0, 0, 0 | 1/1 pass each | `evidence/phase-2c/fi07b-remediation/fi07b-alone-run{1,2,3}.tap` |
+
+The 184 tests are the 131 Phase 1-2B tests (all still passing, none
+removed) and 53 new in Phase 2C: AN1-AN10 (10), RS1-RS7 (7), OR1-OR5 (5),
+ID1-ID4 (4), CX1a-CX1d (8, CX1b has five crash windows), CX2a-CX2e (6), and
+FI-02..FI-15 (13).
+
+**Earlier, superseded runs (kept unchanged as history, not the final
+result):**
+- `evidence/phase-2c/final/run1-test-results.tap` / `.txt`: 184 tests, 183
+  pass, 1 fail (FI-07b).
+- `evidence/phase-2c/final/test-results.tap` / `.txt` and
+  `fi07b-after-fix.tap` (the latter ran the *unchanged* test despite its
+  name): same FI-07b failure, 183/184.
+- Cause, confirmed by a timing probe: FI-07b used a 3 s authorization TTL
+  with whole-second `issued_at`; a redeployment takes 2.1-2.3 s, so the
+  authorization had expired when the new deployment verified it and the
+  reason was `AUTH_EXPIRED,AUTH_KID_UNKNOWN` instead of `AUTH_KID_UNKNOWN`.
+  Always DENY, no payment. Test-only fix (approved): TTL 15 s; the exact
+  `AUTH_KID_UNKNOWN` assertion and every other assertion unchanged; no
+  production change. `evidence/phase-2c/fi07b-remediation/README.md`.
+- `evidence/phase-2c/an4-fixture-reverify/full-suite.tap`: 171/171, before
+  the FI tests were added.
+- `evidence/phase-2c/adversarial/fi-run1.tap`: the first version of FI-07
+  (wrong expectation, replaced by FI-07a/b; see its README).
+
+How to read this section:
+- **Automated:** a test in `npm test`. Process-level tests (CX*, FI-*, R3-*,
+  P2A-*, ID4) run real processes under the four accounts with disposable
+  state roots; unit tests (AN, RS, OR, ID1-3, J) run pure functions or one
+  process.
+- **Manual:** a reproducer, demo, or procedure run once and recorded under
+  `evidence/phase-2c/`, not repeated by `npm test`.
+- **Mutation:** a protection disabled in a disposable copy of the tree, with
+  the named tests run against it (§ "Mutation checks"). KILLED means they
+  failed.
+- A passing test establishes the behavior of the mock in this Codespace (one
+  kernel, ext4, passwordless sudo). It does not establish behavior under
+  power loss, on other filesystems, against root or the operator, or with
+  real `@celo/buy`. Unit tests do not establish OS-level isolation or crash
+  durability.
+
+### Counterexamples found during Phase 2C
+
+| ID | Finding | Status | Evidence |
+| --- | --- | --- | --- |
+| CX1 | One-step `state.json` rollback accepted as an interrupted commit: a third ALLOW over a spent budget | FIXED. The original reproducer now: auth refuses to start (`POLICY_STATE_ROLLBACK:state version 1, anchor head version 2`), no extra ALLOW. Re-run after the CX3 and AN4 changes: same | `counterexamples/` (original), `counterexamples-after-fix/`, `an4-fixture-reverify/cx1-original-reproducer.log`; regressions CX1a-d |
+| CX2 | Reservation released by a new deployment's executor while an older executor (other journal) was still paying it | FIXED. The original reproducer now: reservation stays RESERVED (10000 charged), new deployment `BUDGET_EXCEEDED`, one payment | `counterexamples/` (original), `counterexamples-after-fix/`, `an4-fixture-reverify/cx2-original-reproducer.log`; regressions CX2a-e |
+| CX3 | Anchor parser accepted a PREPARE below the completed head; `reconcile` would complete it | FIXED. The original reproducer now exits 1 with `POLICY_ANCHOR_CORRUPT:PREPARE 8 for version 2, expected 4` (fails safely) | `counterexamples-cx3/` (original), `counterexamples-cx3-after-fix/`, `an4-fixture-reverify/`; regressions AN4, AN6-AN8 |
+
+AN4 fixture correction (approved, option 1): only the AN4 fixture line
+changed, from a history that jumped from version 0 to 3 (rejected by the
+corrected parser while the fixture was being built) to versions 0, 1, 2, 3
+completed in order. The CX3 assertion (a stale PREPARE for version 2 after
+DONE 3 is rejected with POLICY_ANCHOR_CORRUPT) is unchanged, and the anchor
+implementation was not changed for it.
+`evidence/phase-2c/an4-fixture-reverify/README.md`.
+
+### F3: authorization and settlement accounting
+
+| Req | Invariant | Verification | Result | Evidence | Limitation |
+| --- | --- | --- | --- | --- | --- |
+| F3.1 | No payment without valid authorization and available budget | Automated: T1-T10, P2A-01..14, R3-F4e, FI-02 (released capacity used once), FI-04/08 (only remaining capacity usable) | PASS | final suite | mock adapter |
+| F3.2 | Concurrent authorizations never exceed the limit | Automated: R3-F4e (28 concurrent requests across auth and gateway restarts, budget 5 × price: exactly 5 ALLOW) | PASS | final suite | one auth writer per policy identity |
+| F3.3 | Rejected operations release their reservation when safe | Automated: FI-02 (quote drift → REJECTED_BEFORE_EXECUTION; refused before signing → REFUSED_BEFORE_SIGNING), FI-03 (NOT_STARTED), CX1b (CANCELLED), RS2. Mutation M12 KILLED | PASS | final suite, mutation | release depends on the reservation's own execution domain |
+| F3.4 | Ambiguous outcomes are not treated as failures | Automated: FI-04/08 (UNCERTAIN, full charge), RS3, OR3, R-F2a-h. Mutations M03, M04 KILLED | PASS | final suite, mutation | real buy error classification NOT_TESTED |
+| F3.5 | Uncertain payments are not retried automatically | Automated: FI-04/08 (ledger unchanged across executor, auth, and full-deployment restarts; resubmission refused), P2A-09, R-F2g | PASS | final suite | |
+| F3.6 | Reservations tied to immutable authorization and payment identifiers | Automated: RS1, RS5, CX2d (INTENT_HASH_MISMATCH, AMOUNT_EXCEEDS_RESERVATION, UNKNOWN_RESERVATION) | PASS | final suite | |
+| F3.7 | Transitions deterministic, validated, auditable | Automated: RS2, RS4, RS6, FI-05a/b (duplicates ALREADY_APPLIED, contradiction not applied, history records one CONFIRMED) | PASS | final suite | history lives in `state.json`; `decisions.jsonl` is not integrity-protected |
+| F3.8 | No release while execution may have occurred without evidence | Automated: CX2a, CX2b, FI-04/08, FI-09 (damaged records never released), invariants I3/I4 (`assertConsistent`) in every CX and FI test. Mutations M03, M04, M05 KILLED | PASS | final suite, mutation | a lost journal keeps its reservations charged indefinitely (FINANCIAL-INTEGRITY R5) |
+
+### N2: durable payment journal
+
+| Req | Invariant | Verification | Result | Evidence | Limitation |
+| --- | --- | --- | --- | --- | --- |
+| N2.1 | Journal independent of ephemeral runtime directories | Automated: FI-07a/b, CX2a, FI-04/08 (same executor state root across deployments) | PASS | final suite | |
+| N2.2 | Records recovered on startup | Automated: J1, J4, P2A-08, FI-04/08, FI-07a | PASS | final suite | |
+| N2.3 | Missing or corrupt journal never silently resets history | Automated: FI-09 (corrupt `JOURNAL.json`, missing `auths/`: exit 78, nothing recreated), FI-10 (missing journal: exit 78, not recreated), CX2c. Mutation M09 KILLED | PASS | final suite, mutation | `journal.log` is not integrity-checked |
+| N2.4 | Documented durability protocol | Manual review: `src/durable/durable-file.ts`; docs/FINANCIAL-INTEGRITY.md §5 | PASS (documented) | docs | assumes a local POSIX filesystem with atomic rename/link and honored fsync |
+| N2.5 | Interrupted writes never accepted as valid transactions | Automated: J7, FI-09 (truncated and garbled records are UNKNOWN, never released or re-paid), FI-03 (crash between the auth and intent records) | PASS | final suite | power loss NOT_TESTED |
+| N2.6 | Replay and payment identifiers effective after restart | Automated: J2, P2A-08, FI-02, FI-03, FI-04/08, FI-07a, FI-10. Mutation M08 KILLED | PASS | final suite, mutation | |
+| N2.7 | Agent and gateway cannot modify trusted journal storage | Automated: FI-15 (agent and gateway identities: every write, create, and unlink on policy state, anchor, journal, ledger, and lock files refused; all files byte-identical), P2A-11; CX2d (gateway and agent cannot reach the settle socket) | PASS | final suite | |
+
+### N3: state rollback detection
+
+| Req | Invariant | Verification | Result | Evidence | Limitation |
+| --- | --- | --- | --- | --- | --- |
+| N3.1 | Verifiable progression mechanism | Automated: AN1-AN10, CX1d | PASS | final suite | |
+| N3.2 | Restored older snapshot cannot restore spent capacity | Automated: CX1a (refused at startup and while running), CX1c (operator restore carries the charge forward). Manual: original CX1 reproducer re-run. Mutations M02, M10 KILLED | PASS | final suite, mutation, `an4-fixture-reverify/` | |
+| N3.3 | Valid restoration distinguished from rollback | Automated: CX1c (only anchored, completed states; forged backup `POLICY_RESTORE_UNVERIFIED`; open reservations frozen UNCERTAIN), AN10 | PASS | final suite | |
+| N3.4 | Missing, inconsistent, or unverifiable state fails closed | Automated: R3-F1c, CX1d (anchor missing, not append-only, torn line), AN4-AN8. Mutation M01 KILLED | PASS | final suite, mutation | |
+| N3.5 | Not reliant on a counter in the same rollbackable state | Design review: anchor outside the state directory, append-only (`chattr +a`), hash-chained | PASS within the defined threat model | docs/FINANCIAL-INTEGRITY.md §4 | root or the operator can remove `+a` and rewrite both files; whole-filesystem or VM rollback is undetected |
+| **N3 overall** | | | **CONDITIONAL** | | as above |
+
+### B6 / N1: exclusive writer locking
+
+| Req | Invariant | Verification | Result | Evidence | Limitation |
+| --- | --- | --- | --- | --- | --- |
+| L.1 | At most one writer | Automated: R3-F4a (auth), J3, FI-12/13 (executor: a second instance exits 75; of two started at once, exactly one becomes ready) | PASS | final suite | |
+| L.2 | An open descriptor is not ownership | Automated: R3-F4b, J3. Mutation M07 KILLED | PASS | final suite, mutation | |
+| L.3 | Concurrent startup and access: no duplicate reservations, consistent balances | Automated: R3-F4a, R3-F4e, FI-12/13 (`assertConsistent`), P2A-14 | PASS | final suite | |
+| L.4 | Lock failure prevents mutation | Automated: R3-F4d, FI-12/13 (the loser exits before serving) | PASS | final suite | |
+| L.5 | Ownership and release across termination and restart | Automated: R3-F4c (auth SIGKILL), FI-12/13 (executor SIGKILL, then the next start acquires the lock) | PASS | final suite | flock(2) on a local filesystem; trusted `/usr/bin/flock` |
+
+### F5: OS identity configuration
+
+| Req | Invariant | Verification | Result | Evidence | Limitation |
+| --- | --- | --- | --- | --- | --- |
+| F5.1 | Unsafe combinations rejected before start | Automated: ID2. Mutation M11 KILLED | PASS | final suite, mutation | |
+| F5.2 | Agent separated from privileged identities | Automated: ID3, ID4, P2A-02, P2A-11, FI-15 | PASS | final suite | one kernel; uid separation only (B2) |
+| F5.3 | Known socket-permission bypass configurations rejected | Automated: ID2 (agent in the gateway's group, shared uid/gid, group members), ID4 (override variables ignored at process level) | PASS | final suite | |
+| F5.4 | Tested with synthetic unsafe configurations | Automated: ID2 | PASS | final suite | |
+| F5.5 | Approved configuration still works | Automated: ID1, ID3, every process-level test | PASS | final suite | |
+
+### Mandate §6 adversarial cases
+
+| # | Case | Tests (automated, process level unless noted) | Result |
+| --- | --- | --- | --- |
+| 1 | Concurrent authorizations for the final budget | R3-F4e, P2A-14 | PASS |
+| 2 | Payment rejection before execution | FI-02 (quoteDrift, refuseBeforeSigning) | PASS |
+| 3 | Crash after reservation, before execution | FI-03 (crashAfterAuthRecord), CX1b crashBeforeIssue | PASS |
+| 4 | Crash after execution starts, before confirmation | FI-04/08 (crashBeforePay, crashAfterPay), P2A-09 | PASS |
+| 5 | Duplicate payment-result delivery | FI-05a (executor killed before its ack), FI-05b (auth killed after commit; explicit duplicate and contradiction); OR5, RS4 (unit) | PASS |
+| 6 | Repeated authorization consumption | P2A-07, P2A-08, FI-02, FI-03, FI-07a; J2 (unit) | PASS |
+| 7 | Restart with pending reservations | FI-07a (same deployment: pays once), FI-07b (new deployment: refused `AUTH_KID_UNKNOWN`, cancelled by its own domain), CX1b | PASS |
+| 8 | Restart with uncertain outcomes | FI-04/08 (executor, auth, and full-deployment restarts) | PASS |
+| 9 | Journal truncation or corruption | FI-09; J7 (unit) | PASS |
+| 10 | Missing journal or authoritative financial state | FI-10 (journal), R3-F1c (policy state), CX1d (anchor) | PASS |
+| 11 | Stale budget snapshot restored | CX1a, CX1c | PASS |
+| 12 | Simultaneous writer startup | FI-12/13 (executor), R3-F4a (auth) | PASS |
+| 13 | Writer terminated while holding the lock | FI-12/13 (executor SIGKILL), R3-F4c (auth SIGKILL) | PASS |
+| 14 | Unsafe UID/GID overrides | ID2, ID4 | PASS |
+| 15 | Financial-state modification from the agent identity | FI-15 (also the gateway identity), P2A-11 | PASS |
+
+### Mutation checks (M01-M13)
+
+`evidence/phase-2c/mutation/` (README, `run-mutations.ts`). Each mutant
+disables one protection in a disposable copy of the tree (never the
+repository); an unmutated copy must pass first. Manual campaign: not part of
+`npm test`, and not re-run after the FI-07b TTL change (that change touches
+neither the mutated source lines nor the tests selected for any mutant).
+
+| Mutant | Protection disabled | Failing tests | Verdict |
+| --- | --- | --- | --- |
+| M01 | CX3 strict PREPARE version progression | AN4, AN6, AN10 | KILLED |
+| M02 | CX1: state one commit behind the head accepted | AN2, CX1a | KILLED |
+| M03 | F3: UNCERTAIN releases the reservation | RS2, FI-04/08 ×2 | KILLED |
+| M04 | F3: STARTED-not-in-flight reported NOT_EXECUTED | OR3, FI-04/08 ×2 | KILLED |
+| M05 | CX2: cancellation and release not restricted to the reservation's domain | CX2a, CX2b | KILLED |
+| M06 | CX2: reports from a non-current domain accepted | OR5, CX2d | KILLED |
+| M07 | B6/N1: a failed `flock` treated as ownership | J3, FI-12/13, R3-F4a, R3-F4b (4/4) | KILLED (run 3; caveat below) |
+| M08 | N2: journal AUTH_REPLAY on a consumed auth_id | J2 | KILLED |
+| M09 | N2: unreadable record treated as absent | J7, FI-09 | KILLED |
+| M10 | N3: auth service ignores a REFUSE from reconciliation | CX1a | KILLED |
+| M11 | F5: identity validation always passes | ID2 | KILLED |
+| M12 | Executor quote check above the authorized maximum | FI-02 (quoteDrift) | KILLED |
+| M13 | Executor ignores its own authorization verification verdict | P2A-04, P2A-05, P2A-13, CX2e (4/5) | KILLED (run 2; history below) |
+
+Caveats, recorded as they happened:
+- **M07 timeout.** With the lock check disabled, a second writer stays
+  running and the selected test run hangs until the harness's 900 s timeout,
+  before TAP prints its summary. Runs 1 and 2 were therefore misclassified
+  by the harness as SURVIVED although their logs show all four selected
+  tests `not ok` (`M07-run1-timeout.log`, `M07-run2-timeout.log`). After the
+  classifier was fixed (KILLED when any selected test fails, timeout
+  detected), run 3 recorded KILLED 4/4 with `timed_out: true`
+  (`results-run3.json`). The per-mutation `assertOwned` re-check still
+  caught the second auth writer (`not owned (status 75)`). The hung mutant
+  auth processes left by the three runs were stopped afterwards.
+- **M13 equivalent mutant.** The first M13 set the executor's
+  `requireSignatureVerification` to false and SURVIVED
+  (`M13-run1-equivalent.log`). It disabled nothing: the executor uses
+  `mode: "strict"`, which makes signature verification mandatory in
+  `@oxdeai/core@2.0.2` regardless of that flag. It was replaced by a mutant
+  that ignores the verification verdict, which was KILLED.
+- **M12** is detected only by FI-02: without the executor's quote check, the
+  mock adapter's `pay` still refuses a price above `max_amount` before
+  signing (defence in depth), so T3c and R-F1a stay green.
+
+### Phase 2B invariants preserved
+
+All 131 Phase 1-2B tests pass in the final run; none was removed. CX1a was
+adapted with approval to check both boundaries (`counterexamples-after-fix/`).
+Contract change: the signed authorization audience names the execution
+domain (`<base>#exec-domain=<id>`); no new signature, key, or protocol field
+(CX2e). Mutation M13 confirms executor-side verification is tested.
+
+| Invariant | Tests | Result |
+| --- | --- | --- |
+| Independent auth and executor identities; agent cannot bypass the executor | P2A-02, -11, -12, ID1-ID4, FI-15 | PASS |
+| Signed authorization verified at the executor | P2A-04, -05, -13, CX2e | PASS |
+| Exact payment-action binding | T4, P2A-06, R-F1a/b | PASS |
+| Expiry | T5, P2A-04 | PASS |
+| Replay | T6, P2A-07, P2A-08, J2 | PASS |
+| Fail closed | T8a-d, R3-F1c, CX1a, CX1d, FI-09, FI-10 | PASS |
+| Trusted artifact verification | SI-01..SI-07 | PASS |
+| Wallet access protected | P2A-11, P2A-12 | PASS |
+
+### Mock demonstration (manual)
+
+`npm run demo:isolated` on persistent state (budget 20000) with a disposable
+trust store and state roots: run 1 ALLOW (ledger 1, reservation CONFIRMED,
+charge 10000), run 2 ALLOW (ledger 2, charge 20000), run 3 DENY
+`BUDGET_EXCEEDED` (ledger 2). In every run, `unlisted` is denied
+`ALLOWLIST_TARGET`, and the agent gets `EACCES` on the executor socket and the
+wallet. Without `OXDEAI_EXECUTOR_STATE_ROOT`: BLOCKED, exit 2.
+`policy-cli verify` afterwards: state matches the anchor head (version 4),
+append-only. `npm run demo` (single process): exit 0. Evidence:
+`evidence/phase-2c/demo/`. The disposable trust store and state directories
+named in `demo/setup.txt` were not deleted by a cleanup: they were already
+absent after the Codespace restart of 2026-10-28 14:34 UTC, which recreated
+`/tmp` (`evidence/phase-2c/RECOVERY.md`).
+
+### Not established by Phase 2C
+
+| Property | Status |
+| --- | --- |
+| Rollback resistance against root, the operator, or whole-filesystem snapshots | DESIGN_LIMITATION (N3 CONDITIONAL) |
+| Durability under power loss or storage that ignores fsync | NOT_TESTED |
+| Settled amounts from real buy receipts; real buy error classification | NOT_TESTED |
+| Write-off of reservations whose journal was lost | NOT_IMPLEMENTED (they stay charged; fail closed) |
+| Authorizations surviving a redeployment (new PDP key per deployment) | DESIGN_LIMITATION (fail closed, FI-07b) |
+| Independent security review of Phase 2C | NOT_DONE (this is a self-assessment) |
+| Production readiness, real payments, Celo mainnet | NOT CLAIMED |
+
+Readiness: **CONDITIONAL GO FOR INDEPENDENT REVIEW (MOCK ONLY)**. N3
+remains conditional; no production readiness is claimed.
+
 ## AGENTS.md validation list
 
 | Requirement | Status | Evidence |
@@ -454,10 +699,10 @@ is.
 | Ambiguous payment outcome never reported as DENY | PASS | `R-F2a`-`R-F2h`, `R-F1c` |
 | Empty or malformed required allowlists fail closed | PASS | `R-F3` |
 | Executor independently verifies the signed authorization | PASS | `P2A-04`, `P2A-05`, `P2A-06`, `P2A-13` |
-| Durable payment journal: restart, crash recovery, duplicate rejection, no auto-retry | PASS (mock, local disk) | `P2A-08`, `P2A-09`, `P2A-14`, `J1`-`J9b` |
+| Durable payment journal: restart, crash recovery, duplicate rejection, no auto-retry | PASS (mock, local disk) | `P2A-08`, `P2A-09`, `P2A-14`, `J1`-`J9b`; Phase 2C: persistent across redeployment, corruption and missing journal fail closed (FI-04/08, FI-07a/b, FI-09, FI-10) |
 | Gateway holds no signing key or payment credential; signer has no generic signing endpoint | PASS (manual: R2 review experiments, reproduced by the R4 audit; not automated) | P2B-02..05, P2B-20 |
-| Durable budget: no reset on restart, missing state, or redeployment; single writer | PASS (single writer for auth services started by the launcher) | R3-F1a..R3-F4e. Open: N1 (startup check does not prove lock ownership), N3 (no rollback resistance) |
-| Budget reconciled with settled payments | NOT_TESTED | F3 |
+| Durable budget: no reset on restart, missing state, or redeployment; single writer | PASS | R3-F1a..R3-F4e. Phase 2C: N1 fixed (R3-F4b); rollback detection CX1a-d, AN1-AN10, N3 **CONDITIONAL** (not against root, the operator, or whole-filesystem rollback) |
+| Budget reconciled with settled payments | PASS (mock; Phase 2C) | F3: reservations CONFIRMED / RELEASED / UNCERTAIN from signed executor outcome reports (RS1-RS7, OR1-OR5, CX2a-d, FI-02..FI-07b). Real buy settlement data NOT_TESTED |
 
 ## Negative controls for Phase 1 defences (manually executed, not in the suite)
 
@@ -480,7 +725,7 @@ row; `T10`, which includes a tampered-body case, also fails.)
 | `buy_curl` / `buy curl --max-amount` refuses before signing when price > cap | NOT_TESTED | No live buy process |
 | A `@celo/buy` adapter can refuse a different `payTo`, network, or asset before signing | NOT_TESTED | `buy_curl` takes no recipient/network/asset (FEASIBILITY.md §2); payment-time binding is proven for the mock only |
 | Which `@celo/buy` errors guarantee "nothing signed" (`PaymentRefusedError` mapping) | NOT_TESTED | No live buy process; until verified, every buy `pay` error must map to PAYMENT_UNKNOWN |
-| Payment journal durability / reconciliation of INDETERMINATE outcomes | PASS within one deployment (mock, local disk); DESIGN_LIMITATION across a full teardown (N2) | `J1`-`J9b`, `P2A-08`, `P2A-09`; reconciliation remains a manual operator step (`docs/ISOLATION.md` §6) and must happen before teardown |
+| Payment journal durability / reconciliation of INDETERMINATE outcomes | PASS (mock, local disk), also across a full teardown since Phase 2C (N2) | `J1`-`J9b`, `P2A-08`, `P2A-09`, FI-04/08, FI-07a/b; reconciliation remains a manual operator step (`docs/FINANCIAL-INTEGRITY.md` §8); power loss NOT_TESTED |
 | `PurchaseRequest` binds the HTTP request headers that buy forwards | NOT_TESTED | Headers are not part of the binding (`docs/ISOLATION.md` §7) |
 | Real x402 402-challenge parsing | NOT_TESTED | Mock quote format is this PoC's own |
 | Celo settlement | NOT_TESTED | No chain interaction by design |
@@ -488,4 +733,4 @@ row; `T10`, which includes a tampered-body case, also fails.)
 | ERC-8004 agent identity | NOT_TESTED | Out of Phase 1 scope |
 | Replay protection across restart or multiple gateway instances | PASS for duplicate *payment* across gateway and executor restarts (executor durable `auth_id`, P2A-08); NOT_TESTED for the gateway replay store itself and for multiple executor instances on separate storage | Gateway replay store is in memory |
 | Agent authentication / multi-agent identity | NOT_TESTED | `agent_id` fixed by configuration |
-| Budget release for authorizations that are spent but not paid | NOT_TESTED | Not implemented (see ARCHITECTURE.md limitation 4) |
+| Budget release for authorizations that are spent but not paid | PASS (mock; Phase 2C) | Released only with journal proof of non-execution: FI-02, FI-03, FI-07b, CX1b, CX2b; never for uncertain or damaged records (FI-04/08, FI-09) |

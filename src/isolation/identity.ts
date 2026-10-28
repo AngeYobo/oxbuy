@@ -26,6 +26,8 @@ export const ACCOUNT_NAMES: Readonly<Record<Role, string>> = {
 };
 
 export type Identity = { readonly name: string; readonly uid: number; readonly gid: number };
+/** An identity plus what the group database says about its primary group. */
+export type IdentityFacts = Identity & { readonly groupName: string | null; readonly groupMembers: readonly string[] };
 
 function lookup(name: string): Identity | null {
   const r = spawnSync("getent", ["passwd", name], { encoding: "utf8" });
@@ -34,22 +36,77 @@ function lookup(name: string): Identity | null {
   return { name, uid: Number(uid), gid: Number(gid) };
 }
 
+function groupOf(gid: number): { name: string; members: string[] } | null {
+  const r = spawnSync("getent", ["group", String(gid)], { encoding: "utf8" });
+  if (r.status !== 0) return null;
+  const [name, , , members] = r.stdout.trim().split(":");
+  return { name: name!, members: (members ?? "").split(",").filter(Boolean) };
+}
+
 const cache = new Map<Role, Identity | null>();
 
-/** The identity of `role`, or null if its account does not exist. */
+/**
+ * The identity of `role`, looked up by its account name only, or null if the
+ * account does not exist. There is no override (Phase 2C; F5): the former
+ * OXDEAI_AGENT_UID / OXDEAI_AGENT_GID variables are ignored.
+ */
 export function identityOf(role: Role): Identity | null {
-  if (!cache.has(role)) {
-    // Hook for negative controls (e.g. pointing the agent at the operator uid).
-    // It is also honored by the deployed launcher, and only uids are checked
-    // for distinctness, not gids: an agent gid equal to the gateway's lets the
-    // agent reach the auth and executor sockets (F5, docs/ISOLATION.md B7).
-    const envUid = role === "agent" ? process.env.OXDEAI_AGENT_UID : undefined;
-    const id = envUid !== undefined
-      ? { name: `uid-${envUid}`, uid: Number(envUid), gid: Number(process.env.OXDEAI_AGENT_GID ?? envUid) }
-      : lookup(ACCOUNT_NAMES[role]);
-    cache.set(role, id);
-  }
+  if (!cache.has(role)) cache.set(role, lookup(ACCOUNT_NAMES[role]));
   return cache.get(role)!;
+}
+
+/**
+ * Pure check of a full identity configuration (Phase 2C; F5). Null if safe,
+ * otherwise the reason. Rejects, before anything starts:
+ *   - a missing role, or an account whose name is not the expected one;
+ *   - a uid or gid shared with root, the operator, or another role
+ *     (e.g. an agent in the gateway's group would reach the auth and
+ *     executor sockets, whose directories admit the gateway's group);
+ *   - a primary group that is missing or has supplementary members (another
+ *     account could join a domain's group);
+ *   - a role's account listed as a member of another role's group.
+ */
+export function validateIdentities(ids: Partial<Record<Role, IdentityFacts>>, operator: { uid: number; gid: number }): string | null {
+  const uids = new Map<number, string>([
+    [0, "root"],
+    [operator.uid, "the operator"],
+  ]);
+  const gids = new Map<number, string>([
+    [0, "root"],
+    [operator.gid, "the operator"],
+  ]);
+  for (const role of ROLES) {
+    const id = ids[role];
+    if (!id) return `account ${ACCOUNT_NAMES[role]} does not exist`;
+    if (id.name !== ACCOUNT_NAMES[role]) return `${role} must be the account ${ACCOUNT_NAMES[role]}, not ${id.name}`;
+    if (!Number.isSafeInteger(id.uid) || id.uid < 0 || !Number.isSafeInteger(id.gid) || id.gid < 0) return `${role} has an invalid uid/gid`;
+    const u = uids.get(id.uid);
+    if (u) return `${role} uid ${id.uid} is not distinct from ${u}`;
+    uids.set(id.uid, role);
+    const g = gids.get(id.gid);
+    if (g) return `${role} gid ${id.gid} is not distinct from ${g}`;
+    gids.set(id.gid, role);
+    if (id.groupName === null) return `${role} primary group ${id.gid} does not exist`;
+    if (id.groupMembers.length > 0) return `${role} primary group ${id.groupName} has members (${id.groupMembers.join(",")})`;
+  }
+  for (const role of ROLES) {
+    for (const other of ROLES) {
+      if (other !== role && ids[other]!.groupMembers.includes(ACCOUNT_NAMES[role])) return `${role} is a member of ${other}'s group`;
+    }
+  }
+  return null;
+}
+
+/** The configured identities with their group facts, as the system reports them. */
+export function identityFacts(): Partial<Record<Role, IdentityFacts>> {
+  const out: Partial<Record<Role, IdentityFacts>> = {};
+  for (const role of ROLES) {
+    const id = identityOf(role);
+    if (!id) continue;
+    const g = groupOf(id.gid);
+    out[role] = { ...id, groupName: g?.name ?? null, groupMembers: g?.members ?? [] };
+  }
+  return out;
 }
 
 function required(role: Role): Identity {
@@ -74,20 +131,18 @@ export function agentCommand(argv: readonly string[]): [string, string[]] {
 }
 
 /**
- * Null when every domain has its own identity, distinct from each other and
- * from the operator, and the operator can assume each one; otherwise why not.
+ * Null when the four identities pass `validateIdentities` and the operator
+ * can assume each one (kernel-reported uid and gid match); otherwise why not.
  */
 export function identitiesUnavailableReason(roles: readonly Role[] = ROLES): string | null {
-  const seen = new Set<number>([process.getuid!(), 0]);
+  const invalid = validateIdentities(identityFacts(), { uid: process.getuid!(), gid: process.getgid!() });
+  if (invalid !== null) return invalid;
   for (const role of roles) {
-    const id = identityOf(role);
-    if (id === null) return `account ${ACCOUNT_NAMES[role]} does not exist`;
-    if (seen.has(id.uid)) return `${role} uid ${id.uid} is not distinct from the operator, root, or another domain`;
-    seen.add(id.uid);
-    const [cmd, args] = commandAs(role, ["/usr/bin/id", "-u"]);
+    const id = identityOf(role)!;
+    const [cmd, args] = commandAs(role, ["/bin/sh", "-c", "echo $(id -u) $(id -g) $(id -G)"]);
     const r = spawnSync(cmd, args, { encoding: "utf8", timeout: 10_000 });
     if (r.status !== 0) return `cannot switch to ${role} (uid ${id.uid}): ${(r.stderr || r.error?.message || "").trim()}`;
-    if (r.stdout.trim() !== String(id.uid)) return `identity switch for ${role} produced uid ${r.stdout.trim()}`;
+    if (r.stdout.trim() !== `${id.uid} ${id.gid} ${id.gid}`) return `identity switch for ${role} produced ${r.stdout.trim()}`;
   }
   return null;
 }

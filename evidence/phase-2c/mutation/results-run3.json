@@ -1,0 +1,33 @@
+[
+  {
+    "id": "BASELINE",
+    "status": 0,
+    "tests": 4,
+    "pass": 4,
+    "fail": 0,
+    "verdict": "PASS"
+  },
+  {
+    "id": "M07",
+    "protects": "B6 / N1: a failed flock is not ownership (an open descriptor is not a lock)",
+    "files": [
+      "src/durable/exclusive-lock.ts"
+    ],
+    "tests": [
+      "tests/executor/payment-journal.test.ts",
+      "tests/isolation/policy-state.test.ts",
+      "tests/isolation/financial-integrity.test.ts"
+    ],
+    "pattern": "^(J3|R3-F4a|R3-F4b|FI-12)",
+    "ran": 4,
+    "fail": 4,
+    "failing": [
+      "J3 single writer: a second open fails while the first holds the lock; released on close",
+      "FI-12/13 simultaneous executor startup: exactly one journal writer; the loser exits 75 before serving; a SIGKILLed holder's lock is released",
+      "R3-F4a two auth processes starting at once: exactly one owns the writer lock",
+      "R3-F4b (2C, N1) an auth process that only has the lock file open never becomes a second writer"
+    ],
+    "timed_out": true,
+    "verdict": "KILLED"
+  }
+]

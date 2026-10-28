@@ -1,0 +1,55 @@
+TAP version 13
+# Subtest: J7 an unreadable record is reported UNKNOWN, never as absent
+not ok 1 - J7 an unreadable record is reported UNKNOWN, never as absent
+  ---
+  duration_ms: 43.440652
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-eAvBrG/tests/executor/payment-journal.test.ts:130:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+    + undefined
+    - {
+    -   detail: 'JOURNAL_RECORD_UNREADABLE',
+    -   state: 'UNKNOWN'
+    - }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    state: 'UNKNOWN'
+    detail: 'JOURNAL_RECORD_UNREADABLE'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-eAvBrG/tests/executor/payment-journal.test.ts:135:10)
+    Test.runInAsyncScope (node:async_hooks:227:14)
+    Test.run (node:internal/test_runner/test:1402:25)
+    Test.start (node:internal/test_runner/test:1262:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+  ...
+# Subtest: FI-09 journal corruption and truncation: damaged structure refuses to start; damaged records are never released, never re-paid
+not ok 2 - FI-09 journal corruption and truncation: damaged structure refuses to start; damaged records are never released, never re-paid
+  ---
+  duration_ms: 5078.191616
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-eAvBrG/tests/isolation/financial-integrity.test.ts:607:1'
+  failureType: 'testCodeFailure'
+  error: 'executor exited during startup (code 78): {"event":"refused","role":"executor","reason":"absent"}'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    ChildProcess.<anonymous> (file:///tmp/oxdeai-store-2bG4qT/artifacts/c4a6cf684c201ee66784e41de465f1b03c1168994f0f2d64664f2827a676e413/src/isolation/launcher.ts:359:16)
+    ChildProcess.wrapper (node:events:639:12)
+    ChildProcess.emit (node:events:514:28)
+    ChildProcess._handle.onexit (node:internal/child_process:295:12)
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 0
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6090.645858

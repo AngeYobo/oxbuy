@@ -21,11 +21,14 @@
  *      traverse;
  *   5. requires an operator-provisioned, persistent policy state root
  *      (`policyStateRoot` / OXDEAI_POLICY_STATE_ROOT; see
- *      policy-state-admin.ts), kernel-checked as unwritable by every identity
- *      but the auth service. Policy state is never kept in the runtime
- *      directory, so a new deployment does not get a new budget;
- *   6. starts auth (under `flock --nonblock` on the state's writer lock),
- *      executor, and gateway, each as its own identity through
+ *      policy-state-admin.ts) with its root-owned anchor root, and a
+ *      persistent executor state root (`executorStateRoot` /
+ *      OXDEAI_EXECUTOR_STATE_ROOT; see executor-state-admin.ts), each
+ *      kernel-checked as unwritable by every identity but its owner. Neither
+ *      policy state nor the payment journal is kept in the runtime directory,
+ *      so a new deployment gets neither a new budget nor an empty journal;
+ *   6. starts auth (which takes its writer lock itself), executor, and
+ *      gateway, each as its own identity through
  *      `sudo setpriv --no-new-privs --clear-groups --reset-env`.
  *
  * Runtime layout under <root> (mkdtemp, operator, 0711):
@@ -33,16 +36,17 @@
  *   public/     gateway:agent     2750  gateway.sock 0660   agent -> gateway
  *   auth-ipc/   auth:gateway      2750  auth.sock 0660      gateway -> auth
  *   exec-ipc/   executor:gateway  2750  executor.sock 0660  gateway -> executor
+ *   settle-ipc/ auth:executor     2750  settle.sock 0660    executor -> auth (outcome reports)
+ *   settle-proof/ executor:auth   2750  per-request peer-identity proofs (settle-channel.ts)
  *   gateway/    gateway   0700  config.json (public trust material, executor token)
  *   auth/       auth      0700  config.json (signing key)
- *   executor/   executor  0700  config.json, mock-wallet.key, ledger.jsonl, journal/
+ *   executor/   executor  0700  config.json (incl. outcome-report key), mock-wallet.key
  *   logs/       operator  0700  process output; staging/ for config installs
- * Everything under <root>, including the executor's payment journal and
- * mock ledger, is deleted by `stop()` and by the failed-startup cleanup:
- * unresolved journal records do not survive a teardown (docs/ISOLATION.md
- * A9, N2).
- * Persistent, outside <root>:
+ * Everything under <root> is deleted by `stop()` and by the failed-startup
+ * cleanup. Persistent, outside <root> (Phase 2C; N2, N3):
  *   <policyStateRoot>/<binding id>/  auth 0700  state.json, writer.lock, decisions.jsonl
+ *   <policyStateRoot>.anchor/        root 0755  <binding id>.log (auth 0600, append-only)
+ *   <executorStateRoot>/             executor 0700  journal/, ledger.jsonl
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { generateKeyPairSync, randomBytes } from "node:crypto";
@@ -53,12 +57,14 @@ import { fileURLToPath } from "node:url";
 import { createAuthorizationService } from "../authorization/authorization-service.ts";
 import { createInMemoryPolicyStateStore } from "../authorization/policy-state.ts";
 import type { MockLedgerEntry } from "../adapters/mock-buy/mock-settlement.ts";
-import type { PaymentJournalEntry, PaymentJournalRecord } from "../executor/payment-journal.ts";
+import type { AuthRecord, PaymentJournalEntry, PaymentJournalRecord } from "../executor/payment-journal.ts";
 import { AGENT_ID, GATEWAY_AUDIENCE, GATEWAY_TIMEOUT_MS, PDP_ISSUER, POLICY, POLICY_VERSION, SERVICES } from "../system.ts";
 import { ancestorDirs, assertUntrustedCannotWrite, selfRoot, setReadOnly, treePaths, verifyArtifact, verifyCopy } from "./artifact.ts";
 import type { AuthConfig, AuthFaults, ExecutorConfig, ExecutorFaults, GatewayConfig } from "./config.ts";
 import { commandAs, identitiesUnavailableReason, identityOf, writableBy, type Role } from "./identity.ts";
-import { policyBinding, policyStateDir } from "./policy-state-admin.ts";
+import { domainAudience } from "../executor/execution-domain.ts";
+import { executorJournalDir, executorLedgerPath } from "./executor-state-admin.ts";
+import { anchorPathOf, anchorRootOf, policyBinding, policyStateDir } from "./policy-state-admin.ts";
 
 export { AGENT_GID, AGENT_UID, agentIdentityUnavailableReason } from "./identity.ts";
 
@@ -84,6 +90,16 @@ export type LaunchOptions = {
    * policy identity must already be initialized (policy-cli.ts init).
    */
   readonly policyStateRoot?: string;
+  /**
+   * Operator-provisioned persistent executor state root (default
+   * $OXDEAI_EXECUTOR_STATE_ROOT). Required; its journal must already be
+   * initialized (executor-state-admin.ts).
+   */
+  readonly executorStateRoot?: string;
+  /** Executor outcome-report pass interval. Default 2000 ms. */
+  readonly reconcileIntervalMs?: number;
+  /** Cancel a reservation this long after its authorization expired. Default 5 s. */
+  readonly cancelGraceSeconds?: number;
   /** Directory in which the runtime root is created. Default: os.tmpdir(). */
   readonly runtimeParent?: string;
   /** Working directory for programs run as a domain identity (must be readable by it). Default: process.cwd(). */
@@ -108,6 +124,24 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
   assertUntrustedCannotWrite(ancestorDirs(policyStateRoot), { anchors: [policyStateRoot], protectedRoots: [] });
   for (const role of ["agent", "gateway", "executor"] as const) {
     if (writableBy(role, [policyStateRoot]).length > 0) throw new Error(`POLICY_STATE_ROOT_WRITABLE_BY:${role}`);
+  }
+  // Rollback anchor root: root-owned, unwritable by every domain identity (the
+  // auth service may only append to its own append-only file inside it).
+  const anchorRoot = anchorRootOf(policyStateRoot);
+  const anchorStat = spawnSync("sudo", ["-n", "stat", "-c", "%u %a", anchorRoot], { encoding: "utf8" });
+  if (anchorStat.status !== 0 || anchorStat.stdout.trim() !== "0 755") throw new Error(`POLICY_ANCHOR_ROOT_INVALID:${anchorRoot} must exist, owned by root, mode 0755`);
+  assertUntrustedCannotWrite([anchorRoot, ...ancestorDirs(anchorRoot)], { anchors: [anchorRoot], protectedRoots: [anchorRoot] });
+
+  // Persistent executor state: required, outside the runtime directory, writable only by the executor.
+  const executorStateRoot = opts.executorStateRoot ?? process.env.OXDEAI_EXECUTOR_STATE_ROOT;
+  if (!executorStateRoot) throw new Error("EXECUTOR_STATE_ROOT_REQUIRED");
+  const exStat = spawnSync("sudo", ["-n", "stat", "-c", "%u %a", executorStateRoot], { encoding: "utf8" });
+  if (exStat.status !== 0 || exStat.stdout.trim() !== `${identityOf("executor")!.uid} 700`) {
+    throw new Error(`EXECUTOR_STATE_ROOT_INVALID:${executorStateRoot} must exist, owned by oxdeai-executor, mode 0700`);
+  }
+  assertUntrustedCannotWrite(ancestorDirs(executorStateRoot), { anchors: [executorStateRoot], protectedRoots: [] });
+  for (const role of ["agent", "gateway", "auth"] as const) {
+    if (writableBy(role, [executorStateRoot]).length > 0) throw new Error(`EXECUTOR_STATE_ROOT_WRITABLE_BY:${role}`);
   }
 
   const root = mkdtempSync(join(opts.runtimeParent ?? tmpdir(), "oxdeai-p2b-"));
@@ -151,10 +185,28 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
   const { privateKey } = generateKeyPairSync("ed25519");
   const pdpPrivateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
   const kid = `pdp-${randomBytes(4).toString("hex")}`;
+  // Outcome-report key: the private half only in the executor's config, the public half only in auth's.
+  const reportKeys = generateKeyPairSync("ed25519");
+  const reportKey = {
+    privateKeyPem: reportKeys.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+    publicKeyPem: reportKeys.publicKey.export({ type: "spki", format: "pem" }).toString(),
+    kid: `exec-${randomBytes(4).toString("hex")}`,
+  };
   const ttlSeconds = opts.ttlSeconds ?? POLICY.ttlSeconds;
+  // Execution domain (CX2): this deployment's executor uid and its journal's immutable identity.
+  const journalMarker = spawnSync("sudo", ["-n", "cat", join(executorJournalDir(executorStateRoot), "JOURNAL.json")], { encoding: "utf8" });
+  let journalId: unknown;
+  try {
+    journalId = (JSON.parse(journalMarker.stdout) as { journal_id?: unknown }).journal_id;
+  } catch {
+    journalId = undefined;
+  }
+  if (journalMarker.status !== 0 || typeof journalId !== "string") throw new Error(`EXECUTION_DOMAIN_UNAVAILABLE:journal ${executorJournalDir(executorStateRoot)} is missing or not initialized`);
+  const executionDomain = { journal_id: journalId, executor_uid: identityOf("executor")!.uid };
+  const audience = domainAudience(GATEWAY_AUDIENCE, executionDomain);
   const binding = policyBinding({ ttlSeconds });
   const stateDir = policyStateDir(policyStateRoot, binding);
-  const pdpSettings = { issuer: PDP_ISSUER, audience: GATEWAY_AUDIENCE, policyVersion: POLICY_VERSION, ttlSeconds, agentId: AGENT_ID };
+  const pdpSettings = { issuer: PDP_ISSUER, audience, policyVersion: POLICY_VERSION, ttlSeconds, agentId: AGENT_ID };
   const trust = createAuthorizationService({
     ...pdpSettings,
     stateStore: createInMemoryPolicyStateStore(undefined),
@@ -170,6 +222,9 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     publicDir: dir("public"),
     authIpcDir: dir("auth-ipc"),
     execIpcDir: dir("exec-ipc"),
+    settleIpcDir: dir("settle-ipc"),
+    proofDir: dir("settle-proof"),
+    settleSocket: "",
     gatewayDir: dir("gateway"),
     authDir: dir("auth"),
     executorDir: dir("executor"),
@@ -184,10 +239,14 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     authStateDir: stateDir,
     writerLock: join(stateDir, "writer.lock"),
     decisionLog: join(stateDir, "decisions.jsonl"),
+    /** Append-only rollback anchor for this policy identity (outside `root` and outside the state root). */
+    anchorPath: anchorPathOf(policyStateRoot, binding),
+    executorStateRoot,
     executorConfig: "",
-    journalDir: "",
+    /** Persistent journal and ledger (outside `root`). */
+    journalDir: executorJournalDir(executorStateRoot),
     walletKeyPath: "",
-    ledgerPath: "",
+    ledgerPath: executorLedgerPath(executorStateRoot),
   };
   paths.publicSocket = join(paths.publicDir, "gateway.sock");
   paths.authSocket = join(paths.authIpcDir, "auth.sock");
@@ -195,9 +254,8 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
   paths.gatewayConfig = join(paths.gatewayDir, "config.json");
   paths.authConfig = join(paths.authDir, "config.json");
   paths.executorConfig = join(paths.executorDir, "config.json");
-  paths.journalDir = join(paths.executorDir, "journal");
+  paths.settleSocket = join(paths.settleIpcDir, "settle.sock");
   paths.walletKeyPath = join(paths.executorDir, "mock-wallet.key");
-  paths.ledgerPath = join(paths.executorDir, "ledger.jsonl");
 
   /** Install a 0600 file owned by `role` (via a private operator staging file). */
   function install(role: Role, dest: string, data: string | Buffer): void {
@@ -220,13 +278,25 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     ledgerPath: paths.ledgerPath,
     verification: { expectedAudience: trust.audience, trustedKeySets: [trust.keySet], trustedAuthorizationAuthorities: [trust.authority] },
     services: Object.values(SERVICES).map((s) => ({ ...s, price: s.price.toString() })),
+    settleSocketPath: paths.settleSocket,
+    proofDir: paths.proofDir,
+    reportKey: { privateKeyPem: reportKey.privateKeyPem, kid: reportKey.kid },
+    reconcileIntervalMs: opts.reconcileIntervalMs ?? 2_000,
+    cancelGraceSeconds: opts.cancelGraceSeconds ?? 5,
+    domain: { baseAudience: GATEWAY_AUDIENCE, ...executionDomain },
     faults,
   });
   const authConfig = (faults: AuthFaults): AuthConfig => ({
     socketPath: paths.authSocket,
     stateDir: paths.authStateDir,
     lockPath: paths.writerLock,
+    anchorPath: paths.anchorPath,
     decisionLogPath: paths.decisionLog,
+    settleSocketPath: paths.settleSocket,
+    proofDir: paths.proofDir,
+    executorUid: identityOf("executor")!.uid,
+    executorReportKey: { publicKeyPem: reportKey.publicKeyPem, kid: reportKey.kid },
+    executionDomain,
     pdp: { ...pdpSettings, privateKeyPem: pdpPrivateKeyPem, kid },
     faults,
   });
@@ -247,6 +317,8 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     [paths.publicDir, "gateway", "agent", "2750"],
     [paths.authIpcDir, "auth", "gateway", "2750"],
     [paths.execIpcDir, "executor", "gateway", "2750"],
+    [paths.settleIpcDir, "auth", "executor", "2750"],
+    [paths.proofDir, "executor", "auth", "2750"],
   ];
   for (const [p, u, g, mode] of layout) {
     sudo(["chown", `${identityOf(u)!.uid}:${identityOf(g)!.gid}`, p]);
@@ -261,10 +333,8 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
   async function start(role: Service, configPath: string): Promise<void> {
     generation += 1;
     const log = createWriteStream(join(logsDir, `${role}-${generation}.log`), { mode: 0o600 });
-    const main = [node, join(apps[role], "src", "isolation", `${role}-main.ts`), configPath];
-    // Auth runs only while holding the kernel writer lock on its policy state;
-    // flock(1) exits 75 without starting it if another writer holds the lock.
-    const argv = role === "auth" ? ["/usr/bin/flock", "--nonblock", "--conflict-exit-code", "75", paths.writerLock, ...main] : main;
+    // Auth takes its writer lock itself, on its own descriptor (exit 75 if held).
+    const argv = [node, join(apps[role], "src", "isolation", `${role}-main.ts`), configPath];
     const [cmd, args] = commandAs(role, argv);
     const child = spawn(cmd, args, { cwd: apps[role], stdio: ["ignore", "pipe", "pipe"] });
     child.stdout!.pipe(log, { end: false });
@@ -376,8 +446,14 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     if (r.status !== 0) throw new Error(`journal read failed: ${r.stderr}`);
     const records = JSON.parse(r.stdout) as PaymentJournalRecord[];
     const by = new Map(records.map((x) => [x.intent_hash, x]));
+    const a = runAsSync("executor", [node, join(apps.executor, "src", "isolation", "journal-cli.ts"), paths.journalDir, "auths"]);
+    if (a.status !== 0) throw new Error(`journal read failed: ${a.stderr}`);
+    const auths = JSON.parse(a.stdout) as AuthRecord[];
     return {
       list: () => records,
+      /** Per-authorization dispositions (consumed auth_ids). */
+      auths: () => auths,
+      auth: (authId: string) => auths.find((x) => x.auth_id === authId),
       inspect: (h: string) => by.get(h),
       get: (h: string): PaymentJournalEntry | undefined => {
         const x = by.get(h);

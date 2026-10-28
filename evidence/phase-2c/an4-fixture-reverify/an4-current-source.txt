@@ -1,0 +1,17 @@
+test("AN4 tampering, reordering, truncation at the start, and protocol violations are detected", () => {
+  const text = build([...genesis, prepare(1), done(1)]);
+  const lines = text.trim().split("\n");
+  const edited = lines.map((l, i) => (i === 1 ? l.replace(/"version":0/, '"version":5') : l)).join("\n") + "\n";
+  assert.throws(() => parseAnchor(edited), /POLICY_ANCHOR_CORRUPT:chain broken/);
+  assert.throws(() => parseAnchor([lines[0], lines[2], lines[1], lines[3]].join("\n") + "\n"), /POLICY_ANCHOR_CORRUPT/);
+  assert.throws(() => parseAnchor(lines.slice(1).join("\n") + "\n"), /POLICY_ANCHOR_CORRUPT/);
+  assert.throws(() => parseAnchor(""), /POLICY_ANCHOR_CORRUPT:empty/);
+  const g = build(genesis);
+  assert.throws(() => parseAnchor(g + nextEntry(parseAnchor(g), done(7)).text), /DONE .* without matching PREPARE/);
+  const two = build([...genesis, prepare(1)]);
+  assert.throws(() => parseAnchor(two + nextEntry(parseAnchor(two), prepare(2)).text), /while .* is open/);
+  assert.throws(() => parseAnchor(g + nextEntry(parseAnchor(g), { kind: "ABORT", aborts: 0 }).text), /ABORT .* not open/);
+  const down = build([...genesis, prepare(1), done(1), prepare(2), done(2), prepare(3), done(3)]);
+  assert.throws(() => parseAnchor(down + nextEntry(parseAnchor(down), prepare(2)).text + ""), (e: Error) => e.message.startsWith("POLICY_ANCHOR_CORRUPT") || false);
+});
+

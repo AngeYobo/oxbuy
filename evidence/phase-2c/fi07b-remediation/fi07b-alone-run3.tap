@@ -1,0 +1,16 @@
+TAP version 13
+# Subtest: FI-07b restart with a pending reservation, new deployment (new PDP key): the old authorization is refused, stays charged until its own domain cancels it, never pays
+ok 1 - FI-07b restart with a pending reservation, new deployment (new PDP key): the old authorization is refused, stays charged until its own domain cancels it, never pays
+  ---
+  duration_ms: 20741.552961
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 21652.865414

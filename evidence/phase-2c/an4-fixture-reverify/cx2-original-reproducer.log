@@ -1,0 +1,5 @@
+CX2_authorized: {"auth_id":"6c0431d85ae8","expiry_in_s":3}
+CX2_reservation_after_new_deployment_cancel: {"state":"RESERVED","charged":"10000","spent":{"agent-celo-poc-1":{"$bigint":"10000"}}}
+CX2_old_executor_payment: {"decision":"ALLOW","executed":true,"ledger_old":1}
+CX2_new_deployment_can_authorize_again: "DENY:BUDGET_EXCEEDED"
+CX2_result: {"budget":"10000","payments_made":1,"final_spent":{"agent-celo-poc-1":{"$bigint":"10000"}},"reservation":"RESERVED"}

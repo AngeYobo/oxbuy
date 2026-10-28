@@ -259,6 +259,19 @@ Implementation: `src/authorization/policy-state-file.ts` and
 | B9 | The executor's payment journal and mock ledger live in the per-deployment runtime root, which `stop()` and the failed-startup cleanup delete (N2, A9). Unresolved STARTED / UNKNOWN records do not survive a full teardown and redeployment. A persistent journal and durable settlement reconciliation are required before real payments. |
 | B10 | Policy state is persistent but not rollback-resistant (N3, §0.4). |
 
+#### Phase 2C disposition of B4, B6-B10 (mock only; details in docs/FINANCIAL-INTEGRITY.md)
+
+The rows above record Phase 2B as audited and are kept unchanged.
+
+| # | Phase 2C status |
+| --- | --- |
+| B4 | Addressed in the mock: every ALLOW is a reservation that moves to CONFIRMED (charge = settled amount), RELEASED (provably never paid), or UNCERTAIN (held) on signed executor outcome reports (F3). Budget remains reserved capacity until an outcome arrives. |
+| B6 | Replaced: the journal lock is a kernel `flock(2)` on the executor's own descriptor; no pid-based takeover (FI-12/13, J3). |
+| B7 | Removed: identities are looked up by account name only; the UID/GID overrides are ignored and unsafe configurations are rejected before start (F5; ID1-ID4). |
+| B8 | Fixed: the auth service takes and re-checks the lock on its own descriptor (N1; R3-F4b). |
+| B9 | Fixed: journal and ledger live in a persistent, operator-initialized executor state root outside the runtime root (N2; FI-07a/b, FI-09, FI-10). |
+| B10 | Partially addressed: rollback detection with an append-only, hash-chained anchor (N3; CX1a-d, AN1-AN10). CONDITIONAL: does not resist root, the operator, or whole-filesystem rollback. |
+
 ## 1. Phase 2A processes and trust boundaries (historical; superseded by §0)
 
 ```text
@@ -549,6 +562,15 @@ Assumptions:
 
 ## 5. Durable payment journal
 
+> **Phase 2C:** this section describes the Phase 2A/2B journal and is kept as
+> history. Since Phase 2C the journal is persistent in
+> `<executorStateRoot>/journal/` (never inside the runtime root), the lock is
+> `journal.lock` taken with `flock(2)` (no pid file, no stale-lock takeover),
+> records are published with `link(2)`/`rename(2)` after fsync, an `acks/`
+> directory records delivered outcome reports, and a missing or damaged
+> journal makes the executor refuse to start. See docs/FINANCIAL-INTEGRITY.md
+> §5 and §6.
+
 Implementation: `openFilePaymentJournal` in
 `src/executor/payment-journal.ts`. The executor process opens it as a
 writer (see "Locking" below for the limits of single-writer enforcement).
@@ -614,6 +636,12 @@ journal/                0700
   never changed (J4, P2A-09).
 
 ## 6. Recovery and reconciliation procedure
+
+> **Phase 2C:** the current procedure, including the auth-side reservation
+> states, policy-state restore, and execution domains, is in
+> docs/FINANCIAL-INTEGRITY.md §8. The journal is now at
+> `<executorStateRoot>/journal` and survives teardown; the warning at the end
+> of this section applies to Phase 2B only.
 
 1. **After any executor crash,** restart it. It recovers the stale lock and
    prints `needs_reconciliation` for each open record. Duplicates of those

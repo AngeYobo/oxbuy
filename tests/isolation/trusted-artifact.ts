@@ -14,6 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { approveArtifact, removeTree, sealArtifact } from "../../src/isolation/artifact.ts";
 import type { LaunchOptions } from "../../src/isolation/launcher.ts";
+import { initExecutorState, provisionExecutorStateRoot } from "../../src/isolation/executor-state-admin.ts";
 import { initPolicyState, provisionStateRoot } from "../../src/isolation/policy-state-admin.ts";
 import { loadVerifiedLauncher } from "../../src/isolation/trusted-entry.ts";
 
@@ -39,8 +40,20 @@ export function freshPolicyState(opts: { budget?: string; ttlSeconds?: number } 
   return root;
 }
 
+/** Remove a fixture parent (state root, anchor root, or executor state root). Anchor files are append-only: clear the attribute first. */
 export function removeStateRoot(root: string): void {
+  spawnSync("sudo", ["-n", "chattr", "-R", "-a", dirname(root)], { stdio: "ignore" });
   spawnSync("sudo", ["-n", "rm", "-rf", "--", dirname(root)]);
+}
+
+/** A fresh persistent executor state root with an initialized, empty journal (Phase 2C; N2). Removed by `removeStateRoot`. */
+export function freshExecutorState(): string {
+  const parent = mkdtempSync(join(tmpdir(), "oxdeai-exec-"));
+  chmodSync(parent, 0o711);
+  const root = join(parent, "executor");
+  provisionExecutorStateRoot(root);
+  initExecutorState(root);
+  return root;
 }
 
 export type TestLaunchOptions = LaunchOptions & { budget?: string };
@@ -60,14 +73,22 @@ export async function trustedArtifact(sourceRoot: string = REPO_ROOT) {
     store,
     digest,
     artifactRoot: join(store, "artifacts", digest),
-    /** Launch; without `policyStateRoot`, a fresh state root is initialized with `budget` first. */
+    /**
+     * Launch; without `policyStateRoot`, a fresh state root is initialized with
+     * `budget` first; without `executorStateRoot`, a fresh executor state root.
+     */
     launch: ({ budget, ...opts }: TestLaunchOptions = {}) => {
       let policyStateRoot = opts.policyStateRoot;
       if (policyStateRoot === undefined) {
         policyStateRoot = freshPolicyState({ budget, ttlSeconds: opts.ttlSeconds });
         stateRoots.push(policyStateRoot);
       }
-      return launcher.launchIsolatedSystem({ agentCwd: REPO_ROOT, ...opts, policyStateRoot });
+      let executorStateRoot = opts.executorStateRoot;
+      if (executorStateRoot === undefined) {
+        executorStateRoot = freshExecutorState();
+        stateRoots.push(executorStateRoot);
+      }
+      return launcher.launchIsolatedSystem({ agentCwd: REPO_ROOT, ...opts, policyStateRoot, executorStateRoot });
     },
     cleanup: () => {
       removeTree(store);
