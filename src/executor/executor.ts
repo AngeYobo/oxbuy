@@ -32,6 +32,19 @@
  * service synchronously; if the VOID is not acknowledged, the reservation
  * stays charged until it expires there.
  *
+ * Final rejections (F-SIBLING, patch 0008): every NOT_EXECUTED answer carries
+ * `final`. It is true only when the authorization service itself has durably
+ * confirmed, for this request, that the authorization can never be claimed
+ * again (acknowledged VOID, a claim refused because the reservation already
+ * left RESERVED or expired, or a claim that committed and was then refused
+ * before signing). Such a rejection survives any rollback of the executor's
+ * state, checkpoint included, because the service never re-enters RESERVED.
+ * When the service could not confirm it (outage, timeout, journal failure, a
+ * replay answer, an unauthentic request), `final` is false: nothing was paid,
+ * but the rejection is protected only by the executor's journal and
+ * checkpoint, and the caller must not treat the authorization as dead until it
+ * expires.
+ *
  * Every response states one of three outcomes:
  *   NOT_EXECUTED     nothing was signed or submitted;
  *   EXECUTED         `pay` returned a settled receipt matching the binding;
@@ -45,12 +58,12 @@ import { verifyAuthorization, type AuthorizationAuthority, type AuthorizationV1,
 import { protectUpstreamExecution } from "@oxdeai/guard";
 import { hashGatewayAction, validatePurchaseRequest } from "../authorization/intent.ts";
 import type { PurchaseRequest } from "../agent/purchase-request.ts";
-import type { ExecutionAuthority } from "./execution-authority.ts";
+import { claimRefusalIsFinal, type ExecutionAuthority } from "./execution-authority.ts";
 import { PaymentRefusedError, type PaymentAdapter, type PaymentReceipt, type QuoteRequest } from "./payment-adapter.ts";
 import type { PaymentJournal } from "./payment-journal.ts";
 
 export type ExecutorOutcome =
-  | { readonly outcome: "NOT_EXECUTED"; readonly error: string; readonly prior_state?: string }
+  | { readonly outcome: "NOT_EXECUTED"; readonly error: string; readonly final: boolean; readonly prior_state?: string }
   | { readonly outcome: "EXECUTED"; readonly receipt: PaymentReceipt }
   | { readonly outcome: "PAYMENT_UNKNOWN"; readonly error: string; readonly receipt?: unknown; readonly prior_state?: string };
 
@@ -155,17 +168,18 @@ export function createPaymentExecutor(options: ExecutorOptions) {
       if (quote.resource !== `${u.origin}${u.pathname}`) throw new Error("EXECUTOR_QUOTE_RESOURCE_MISMATCH");
       if (BigInt(quote.amount) > BigInt(request.max_amount)) throw new Error("EXECUTOR_QUOTE_EXCEEDS_AUTHORIZED_MAX");
     } catch (err) {
-      if (!authentic) return { outcome: "NOT_EXECUTED", error: message(err) };
+      if (!authentic) return { outcome: "NOT_EXECUTED", error: message(err), final: false };
       try {
         const rec = journal.consume({ auth_id: authId!, intent_hash: intentHash!, disposition: "REJECTED_BEFORE_EXECUTION", detail: message(err) });
         // Already consumed earlier (a replay): report what the journal holds, never a new rejection.
-        if (rec.disposition !== "REJECTED_BEFORE_EXECUTION") return { outcome: "NOT_EXECUTED", error: "EXECUTOR_AUTH_REPLAY" };
+        if (rec.disposition !== "REJECTED_BEFORE_EXECUTION") return { outcome: "NOT_EXECUTED", error: "EXECUTOR_AUTH_REPLAY", final: false };
       } catch (storageErr) {
-        return { outcome: "NOT_EXECUTED", error: `${message(err)};EXECUTOR_JOURNAL_UNAVAILABLE:${message(storageErr)}` };
+        return { outcome: "NOT_EXECUTED", error: `${message(err)};EXECUTOR_JOURNAL_UNAVAILABLE:${message(storageErr)}`, final: false };
       }
-      // Burn it at the authority, synchronously. Unacknowledged: it stays charged until it expires there.
-      await options.authority.void({ auth_id: authId!, intent_hash: intentHash!, reason: "REJECTED_BEFORE_EXECUTION" }).catch(() => undefined);
-      return { outcome: "NOT_EXECUTED", error: message(err) };
+      // Burn it at the authority, synchronously. Unacknowledged: it stays charged until it expires there,
+      // and the rejection is not final (F-SIBLING): only the service's confirmation survives a rollback.
+      const voided = await voidFinal({ auth_id: authId!, intent_hash: intentHash!, reason: "REJECTED_BEFORE_EXECUTION" });
+      return { outcome: "NOT_EXECUTED", error: message(err), final: voided };
     }
 
     let reservation;
@@ -182,17 +196,17 @@ export function createPaymentExecutor(options: ExecutorOptions) {
       try {
         reservation = journal.reserve({ intent_hash: intentHash, auth_id: authId, request, claim_id: claimId });
       } catch (err) {
-        return { outcome: "NOT_EXECUTED", error: `EXECUTOR_JOURNAL_UNAVAILABLE:${message(err)}` };
+        return { outcome: "NOT_EXECUTED", error: `EXECUTOR_JOURNAL_UNAVAILABLE:${message(err)}`, final: false };
       }
       if (!reservation.ok) {
-        if (reservation.reason === "AUTH_REPLAY") return { outcome: "NOT_EXECUTED", error: "EXECUTOR_AUTH_REPLAY" };
+        if (reservation.reason === "AUTH_REPLAY") return { outcome: "NOT_EXECUTED", error: "EXECUTOR_AUTH_REPLAY", final: false };
         // This request is never paid. If the earlier attempt's outcome is not
         // definitive, the intent's payment status is unknown, not "not executed".
         const prior = reservation.prior;
         if (prior === "STARTED" || prior === "UNKNOWN") {
           return { outcome: "PAYMENT_UNKNOWN", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", prior_state: prior };
         }
-        return { outcome: "NOT_EXECUTED", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", prior_state: prior };
+        return { outcome: "NOT_EXECUTED", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", final: false, prior_state: prior };
       }
 
       // The irreversible boundary: `pay` only with this attempt's acknowledged, durably committed claim.
@@ -203,12 +217,12 @@ export function createPaymentExecutor(options: ExecutorOptions) {
         claim = { ok: false as const, definitive: false, reason: message(err) };
       }
       if (!claim.ok) {
-        if (claim.definitive) return refuse(intentHash, "CLAIM_REFUSED", `EXECUTOR_CLAIM_REFUSED:${claim.reason}`);
+        if (claim.definitive) return refuse(intentHash, "CLAIM_REFUSED", `EXECUTOR_CLAIM_REFUSED:${claim.reason}`, claimRefusalIsFinal(claim.reason));
         // The claim may have committed. Never pay it: record that first, then try to void it.
-        const out = refuse(intentHash, "CLAIM_ABANDONED", `EXECUTOR_CLAIM_UNAVAILABLE:${claim.reason}`);
+        const out = refuse(intentHash, "CLAIM_ABANDONED", `EXECUTOR_CLAIM_UNAVAILABLE:${claim.reason}`, false);
         // This process will never pay this claim, so the VOID is true even if the record failed.
-        await options.authority.void({ auth_id: authId, intent_hash: intentHash, reason: "CLAIM_ABANDONED", claim_id: claimId }).catch(() => undefined);
-        return out;
+        const voided = await voidFinal({ auth_id: authId, intent_hash: intentHash, reason: "CLAIM_ABANDONED", claim_id: claimId });
+        return out.outcome === "NOT_EXECUTED" ? { ...out, final: voided } : out;
       }
 
       let receipt: unknown;
@@ -216,7 +230,8 @@ export function createPaymentExecutor(options: ExecutorOptions) {
         receipt = await options.adapter.pay({ intent_hash: intentHash, request, claim_id: claimId });
       } catch (err) {
         if (err instanceof PaymentRefusedError) {
-          return finish(intentHash, { outcome: "NOT_EXECUTED", error: err.message }, "REFUSED_BEFORE_SIGNING", err.message);
+          // The claim committed, so the service will never grant another one for this authorization.
+          return finish(intentHash, { outcome: "NOT_EXECUTED", error: err.message, final: true }, "REFUSED_BEFORE_SIGNING", err.message);
         }
         return finish(
           intentHash,
@@ -240,12 +255,21 @@ export function createPaymentExecutor(options: ExecutorOptions) {
    * cannot be written the journal still says STARTED (reported UNCERTAIN, held);
    * the response is still NOT_EXECUTED, which is true.
    */
-  function refuse(intentHash: string, state: "CLAIM_REFUSED" | "CLAIM_ABANDONED", error: string): ExecutorOutcome {
+  function refuse(intentHash: string, state: "CLAIM_REFUSED" | "CLAIM_ABANDONED", error: string, final: boolean): ExecutorOutcome {
     try {
       journal.record(intentHash, state, error);
-      return { outcome: "NOT_EXECUTED", error };
+      return { outcome: "NOT_EXECUTED", error, final };
     } catch (err) {
-      return { outcome: "NOT_EXECUTED", error: `${error};EXECUTOR_JOURNAL_WRITE_FAILED:${message(err)}` };
+      return { outcome: "NOT_EXECUTED", error: `${error};EXECUTOR_JOURNAL_WRITE_FAILED:${message(err)}`, final };
+    }
+  }
+
+  /** VOID at the authority; true only when the service confirmed the authorization can never be claimed again. */
+  async function voidFinal(v: Parameters<ExecutionAuthority["void"]>[0]): Promise<boolean> {
+    try {
+      return (await options.authority.void(v)).final === true;
+    } catch {
+      return false;
     }
   }
 

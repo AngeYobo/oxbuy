@@ -168,6 +168,6 @@ test("R-F2h executor never hands the same intent to pay twice, even with a valid
   const second = await executor.handle(body, headers);
   assert.equal(first.executed, true);
   assert.equal(second.executed, false);
-  assert.deepEqual(second.body, { outcome: "NOT_EXECUTED", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", prior_state: "SETTLED" });
+  assert.deepEqual(second.body, { outcome: "NOT_EXECUTED", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", final: false, prior_state: "SETTLED" });
   assert.equal(mock.inspect.counters.payments, 1);
 });

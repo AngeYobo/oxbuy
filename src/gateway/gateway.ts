@@ -66,6 +66,8 @@ export type GatewayResult = {
     readonly decision: GatewayDecision;
     /** "unknown" only with INDETERMINATE. */
     readonly executed: boolean | "unknown";
+    /** DENY from the executor: the authorization service confirmed the authorization can never be claimed again (F-SIBLING). */
+    readonly final?: boolean;
     readonly reason?: string;
     readonly detail?: string;
     readonly auth_id?: string;
@@ -87,7 +89,7 @@ function snapshot(input: unknown): unknown {
   return deepFreeze(JSON.parse(JSON.stringify(input)));
 }
 
-type ExecutorBody = { outcome?: unknown; error?: unknown; receipt?: unknown };
+type ExecutorBody = { outcome?: unknown; error?: unknown; receipt?: unknown; final?: unknown };
 
 function classify(r: PepGatewayResult, detached: unknown): GatewayResult {
   if (!r.upstreamCalled) {
@@ -111,7 +113,8 @@ function classify(r: PepGatewayResult, detached: unknown): GatewayResult {
     return {
       status: r.status,
       upstreamCalled: true,
-      body: { ok: false, decision: "DENY", executed: false, reason: r.body.reason, detail: String(error), ...ids },
+      // `final` (F-SIBLING): the authorization service confirmed this authorization can never be claimed again.
+      body: { ok: false, decision: "DENY", executed: false, final: upstream?.final === true, reason: r.body.reason, detail: String(error), ...ids },
     };
   }
   return {

@@ -535,3 +535,83 @@ test("RB5-d F-SIBLING mitigation: a checkpoint that lost its append-only attribu
   assert.equal(s.ledger().length, 1);
   sudo(["chattr", "+a", cp]); // test cleanup only (the test-owned root is removed afterwards)
 });
+
+// ── F-SIBLING closure (patch 0008) ───────────────────────────────────────────
+// The review's end state: the journal AND the checkpoint restored together from one older backup, and the
+// append-only attribute re-armed (by hand, as root, as the review's laundering operator did). No
+// executor-side store remembers the rejection any more; only the authorization service can.
+
+const snapshotCheckpoint = (s: IsolatedSystem) => {
+  const parent = mkdtempSync(join(tmpdir(), "oxdeai-checkpoint-snap-"));
+  const snap = join(parent, "checkpoint.log");
+  roots.push(snap);
+  assert.equal(sudo(["cp", "-a", s.paths.executorAnchorPath, snap]).status, 0);
+  return snap;
+};
+/** Restore the whole executor state (journal + checkpoint) and launder the checkpoint (+a re-armed). */
+const restoreAllAndLaunder = (s: IsolatedSystem, journalSnap: string, checkpointSnap: string) => {
+  restoreJournal(s, journalSnap);
+  const cp = s.paths.executorAnchorPath;
+  assert.equal(sudo(["chattr", "-a", cp]).status, 0);
+  assert.equal(sudo(["cp", "-a", checkpointSnap, cp]).status, 0);
+  assert.equal(sudo(["chattr", "+a", cp]).status, 0);
+};
+
+test("RB6-a F-SIBLING closed: a rejection answered final:true (VOID confirmed by the auth service) is never paid, even after the journal AND the checkpoint are restored together and re-armed", opts, async () => {
+  const s = await launch(2n * PRICE);
+  const a = await authorizeAsAgent(s);
+  const id = a.authorization.auth_id as string;
+  await s.stopExecutor();
+  const jsnap = snapshotJournal(s);
+  const csnap = snapshotCheckpoint(s);
+  await s.startExecutor({ quoteDrift: true });
+  const r1 = await submit(s, a);
+  assert.deepEqual([r1.decision, r1.executed, r1.final], ["DENY", false, true], JSON.stringify(r1));
+  const v = reservation(s, id);
+  assert.deepEqual([v.state, v.history.at(-1)!.outcome, v.history.at(-1)!.reason], ["RELEASED", "VOID", "REJECTED_BEFORE_EXECUTION"]);
+  await s.stopExecutor();
+  restoreAllAndLaunder(s, jsnap, csnap);
+  await s.startExecutor(); // the rollback is invisible locally: the executor starts, and the quote would now pass
+  assert.equal(s.journal().auth(id), undefined, "precondition: no executor-side record of the rejection");
+  for (let i = 0; i < 2; i++) {
+    await s.restartGateway(); // a fresh gateway replay store each time: every submission reaches the executor
+    const r = await submit(s, a);
+    assert.notEqual(r.decision, "ALLOW", JSON.stringify(r));
+    if (i === 0) {
+      // The executor has no memory of the rejection: the auth service refuses the claim, and says it is final.
+      assert.match(JSON.stringify(r), /CLAIM_REFUSED:NOT_ELIGIBLE:RELEASED/);
+      assert.equal(r.final, true);
+    } else {
+      assert.match(JSON.stringify(r), /CLAIM_REFUSED|DUPLICATE_PAYMENT_ATTEMPT|AUTH_REPLAY/, "then refused again (locally or by the service)");
+    }
+  }
+  assert.equal(s.ledger().length, 0, "the finally rejected authorization never paid");
+  assert.equal(spent(s), 0n);
+  assert.equal(await buy(s), "ALLOW", "the system still works for a fresh authorization");
+  assert.equal(s.ledger().length, 1);
+});
+
+test("RB6-b F-SIBLING residual (characterization): a rejection while the auth service is unreachable is answered final:false; after the same full restore it can pay once, within its binding, charged once", opts, async () => {
+  const s = await launch(2n * PRICE);
+  const a = await authorizeAsAgent(s);
+  const id = a.authorization.auth_id as string;
+  await s.stopExecutor();
+  const jsnap = snapshotJournal(s);
+  const csnap = snapshotCheckpoint(s);
+  await s.startExecutor({ quoteDrift: true });
+  await s.stopAuth();
+  const r1 = await submit(s, a);
+  assert.deepEqual([r1.decision, r1.executed, r1.final], ["DENY", false, false], JSON.stringify(r1));
+  await s.stopExecutor();
+  await s.startAuth();
+  assert.equal(reservation(s, id).state, "RESERVED", "the auth service never learned of the rejection");
+  restoreAllAndLaunder(s, jsnap, csnap);
+  await s.startExecutor();
+  await s.restartGateway();
+  const r2 = await submit(s, a);
+  assert.equal(r2.decision, "ALLOW", "residual: a non-final rejection is protected only by the executor's own state");
+  assert.equal(s.ledger().length, 1);
+  assert.equal(spent(s), PRICE, "within its binding, charged once");
+  assert.notEqual((await submit(s, a)).decision, "ALLOW", "and never twice");
+  assert.equal(s.ledger().length, 1);
+});
