@@ -26,7 +26,7 @@ import { interpretClaim, interpretVoid, type ExecutionAuthority } from "../execu
 import { CLAIM_TYPE, signClaim, signVoid, VOID_TYPE } from "../executor/outcome-report.ts";
 import { createOutcomeReporter } from "../executor/outcome-reporter.ts";
 import { PaymentRefusedError, type PaymentAdapter } from "../executor/payment-adapter.ts";
-import { openFilePaymentJournal, type FilePaymentJournal } from "../executor/payment-journal.ts";
+import { journalIdOf, openFilePaymentJournal, type FilePaymentJournal } from "../executor/payment-journal.ts";
 import { emit, readConfig, type ExecutorConfig, type ExecutorFaults } from "./config.ts";
 import { serveJson } from "./ipc.ts";
 import { settlePost } from "./settle-channel.ts";
@@ -60,13 +60,22 @@ function refuse(code: number, reason: string): never {
 
 let journal: FilePaymentJournal;
 try {
+  // CX2 first: a journal of another execution domain is refused before its checkpoint is looked at.
+  const jid = journalIdOf(config.journalDir);
+  if (jid !== config.domain.journal_id) refuse(78, `EXECUTION_DOMAIN_MISMATCH:journal ${jid} uid ${process.getuid!()}`);
   journal = openFilePaymentJournal(config.journalDir, {
     // Fault: crash between consuming the auth_id and creating the intent record.
     afterAuthRecord: faults.crashAfterAuthRecord ? () => process.kill(process.pid, "SIGKILL") : undefined,
+    // AUD-02/03/04: a checkpointed fact missing from the journal (a rollback) refuses to start (exit 78).
+    checkpoint: {
+      path: config.anchorPath,
+      beforeAppend: faults.crashBeforeCheckpoint ? () => process.kill(process.pid, "SIGKILL") : undefined,
+      onRollback: (detail) => emit({ event: "journal_rollback_detected", detail }),
+    },
   });
 } catch (err) {
   const msg = (err as Error).message;
-  refuse(msg.startsWith("JOURNAL_LOCKED") ? 75 : 78, msg);
+  refuse(msg.startsWith("JOURNAL_LOCKED") || msg.startsWith("CHECKPOINT_LOCKED") ? 75 : 78, msg);
 }
 // CX2: verify the execution-domain binding from this process's own uid and open journal.
 {

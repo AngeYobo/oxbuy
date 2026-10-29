@@ -63,7 +63,7 @@ import { ancestorDirs, assertUntrustedCannotWrite, selfRoot, setReadOnly, treePa
 import type { AuthConfig, AuthFaults, ExecutorConfig, ExecutorFaults, GatewayConfig } from "./config.ts";
 import { commandAs, identitiesUnavailableReason, identityOf, writableBy, type Role } from "./identity.ts";
 import { domainAudience } from "../executor/execution-domain.ts";
-import { executorJournalDir, executorLedgerPath, executorWalletKeyPath } from "./executor-state-admin.ts";
+import { executorAnchorPath, executorAnchorRoot, executorJournalDir, executorLedgerPath, executorWalletKeyPath } from "./executor-state-admin.ts";
 import { anchorPathOf, anchorRootOf, policyBinding, policyStateDir } from "./policy-state-admin.ts";
 
 export { AGENT_GID, AGENT_UID, agentIdentityUnavailableReason } from "./identity.ts";
@@ -147,6 +147,13 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
   for (const role of ["agent", "gateway", "auth"] as const) {
     if (writableBy(role, [executorStateRoot]).length > 0) throw new Error(`EXECUTOR_STATE_ROOT_WRITABLE_BY:${role}`);
   }
+  // Executor consumption checkpoint root (AUD-02/03/04): root-owned, outside the executor state root.
+  const executorAnchorRootDir = executorAnchorRoot(executorStateRoot);
+  const exAnchorStat = spawnSync("sudo", ["-n", "stat", "-c", "%u %a", executorAnchorRootDir], { encoding: "utf8" });
+  if (exAnchorStat.status !== 0 || exAnchorStat.stdout.trim() !== "0 755") {
+    throw new Error(`EXECUTOR_CHECKPOINT_ROOT_INVALID:${executorAnchorRootDir} must exist, owned by root, mode 0755`);
+  }
+  assertUntrustedCannotWrite([executorAnchorRootDir, ...ancestorDirs(executorAnchorRootDir)], { anchors: [executorAnchorRootDir], protectedRoots: [executorAnchorRootDir] });
 
   const root = mkdtempSync(join(opts.runtimeParent ?? tmpdir(), "oxdeai-p2b-"));
   chmodSync(root, 0o711);
@@ -249,6 +256,8 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     executorConfig: "",
     /** Persistent journal and ledger (outside `root`). */
     journalDir: executorJournalDir(executorStateRoot),
+    /** Append-only consumption checkpoint of the journal (AUD-02/03/04; outside the executor state root). */
+    executorAnchorPath: executorAnchorPath(executorStateRoot, journalId),
     /** Persistent mock wallet key (Phase 2D; created by executor-cli init). */
     walletKeyPath: executorWalletKeyPath(executorStateRoot),
     ledgerPath: executorLedgerPath(executorStateRoot),
@@ -278,6 +287,7 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     socketPath: paths.executorSocket,
     internalToken,
     journalDir: paths.journalDir,
+    anchorPath: paths.executorAnchorPath,
     walletKeyPath: paths.walletKeyPath,
     ledgerPath: paths.ledgerPath,
     verification: { expectedAudience: trust.audience, trustedKeySets: [trust.keySet], trustedAuthorizationAuthorities: [trust.authority] },

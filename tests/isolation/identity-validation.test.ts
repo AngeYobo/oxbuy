@@ -12,6 +12,7 @@ process.env.OXDEAI_AGENT_GID = "984";
 
 const assert: typeof import("node:assert/strict") = (await import("node:assert/strict")).default;
 const { join } = await import("node:path");
+const { spawnSync } = await import("node:child_process");
 const { after, before, test } = await import("node:test");
 const { ACCOUNT_NAMES, identitiesUnavailableReason, identityFacts, identityOf, validateIdentities } = await import("../../src/isolation/identity.ts");
 const { REPO_ROOT, trustedArtifact } = await import("./trusted-artifact.ts");
@@ -52,6 +53,11 @@ test("ID2 unsafe synthetic configurations are rejected", () => {
 
 const BLOCKED = identitiesUnavailableReason();
 const opts = BLOCKED === null ? {} : { skip: `BLOCKED: ${BLOCKED}` };
+/** The real agent account, read independently of src/isolation/identity.ts (the code under test). */
+const realAgent = (() => {
+  const [, , uid, gid] = spawnSync("getent", ["passwd", "oxdeai-agent"], { encoding: "utf8" }).stdout.trim().split(":");
+  return { uid: Number(uid), gid: Number(gid) };
+})();
 let trusted: Awaited<ReturnType<typeof trustedArtifact>>;
 before(async () => {
   if (BLOCKED === null) trusted = await trustedArtifact();
@@ -60,15 +66,16 @@ after(() => trusted?.cleanup());
 
 test("ID3 the real accounts pass validation, and the override variables are ignored", opts, () => {
   assert.equal(validateIdentities(identityFacts(), { uid: process.getuid!(), gid: process.getgid!() }), null);
-  assert.equal(identityOf("agent")!.uid, 999, "OXDEAI_AGENT_UID=4242 has no effect");
-  assert.equal(identityOf("agent")!.gid, 985, "OXDEAI_AGENT_GID=984 has no effect");
+  assert.notEqual(realAgent.uid, 4242, "precondition: the override differs from the real account");
+  assert.equal(identityOf("agent")!.uid, realAgent.uid, "OXDEAI_AGENT_UID=4242 has no effect");
+  assert.equal(identityOf("agent")!.gid, realAgent.gid, "OXDEAI_AGENT_GID=984 has no effect");
 });
 
 test("ID4 process level, override variables set (R4 F5 configuration): the agent is still oxdeai-agent and cannot reach the auth, executor, or settle sockets", opts, async () => {
   const s = await trusted.launch({});
   try {
     const probe = join(REPO_ROOT, "tests", "isolation", "agent-probe.ts");
-    assert.deepEqual((await s.runAgent(probe, ["whoami"])).result, { uid: 999, gid: 985, groups: [985] });
+    assert.deepEqual((await s.runAgent(probe, ["whoami"])).result, { uid: realAgent.uid, gid: realAgent.gid, groups: [realAgent.gid] });
     const c = (await s.runAgent(probe, ["connect", s.paths.authSocket, s.paths.executorSocket, s.paths.settleSocket, s.paths.publicSocket])).result as Record<string, { ok: boolean; code?: string }>;
     assert.equal(c[s.paths.authSocket]!.code, "EACCES");
     assert.equal(c[s.paths.executorSocket]!.code, "EACCES");

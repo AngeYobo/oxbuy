@@ -57,6 +57,17 @@ import { join } from "node:path";
 import type { PurchaseRequest } from "../agent/purchase-request.ts";
 import { appendDurable, createDurable, fsyncDir, isEexist, replaceDurable } from "../durable/durable-file.ts";
 import { acquireExclusiveLock, LockError, type ExclusiveLock } from "../durable/exclusive-lock.ts";
+import {
+  appendCheckpoint,
+  CheckpointError,
+  compareJournal,
+  EXECUTOR_ANCHOR_FORMAT,
+  finalBody,
+  loadCheckpointFor,
+  type AnchorBody,
+  type CheckpointState,
+  type Discrepancy,
+} from "./executor-anchor.ts";
 
 export type PaymentJournalState = "STARTED" | "SETTLED" | "REFUSED_BEFORE_SIGNING" | "UNKNOWN" | "CLAIM_REFUSED" | "CLAIM_ABANDONED";
 export type PaymentJournalEntry = { readonly state: PaymentJournalState; readonly detail?: string };
@@ -116,6 +127,7 @@ const INTENT_HASH = /^[0-9a-f]{64}$/;
 export const JOURNAL_FORMAT = "oxdeai-celo-poc/payment-journal/v2";
 
 const authKey = (authId: string) => createHash("sha256").update(authId, "utf8").digest("hex");
+const sha256hex = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
 
 function entryOf(r: PaymentJournalRecord): PaymentJournalEntry {
   return r.detail === undefined ? { state: r.state } : { state: r.state, detail: r.detail };
@@ -316,6 +328,24 @@ export function readFilePaymentJournal(dir: string) {
   };
 }
 
+/**
+ * Executor consumption checkpoint (src/executor/executor-anchor.ts; AUD-02/03/04).
+ *   normal   the checkpoint must be sealed for this journal; any fact it holds that the journal lacks
+ *            is a journal rollback: open throws JOURNAL_ROLLBACK_DETECTED (fail closed)
+ *   seal     an empty checkpoint is sealed for this journal (GENESIS + every current fact)
+ *   recover  a detected rollback is tolerated so that `recoverFromCheckpoint` can re-import the lost facts
+ */
+export type CheckpointOptions = {
+  readonly path: string;
+  readonly mode?: "normal" | "seal" | "recover";
+  /** Default true. False only for unit tests on filesystems without chattr. */
+  readonly requireAppendOnly?: boolean;
+  /** Fault injection: called after a journal write, before its checkpoint entry is appended. */
+  readonly beforeAppend?: (body: AnchorBody) => void;
+  /** Called once when a rollback is detected while running. */
+  readonly onRollback?: (detail: string) => void;
+};
+
 export type FilePaymentJournal = PaymentJournal &
   ReturnType<typeof readFilePaymentJournal> & {
     /** Operator reconciliation of a STARTED or UNKNOWN record, with settlement evidence the caller verified. */
@@ -326,6 +356,10 @@ export type FilePaymentJournal = PaymentJournal &
     readonly needsReconciliation: readonly PaymentJournalRecord[];
     /** Immutable journal identity (execution domain). */
     readonly journalId: string;
+    /** Checkpoint facts the journal lacks, found at open (non-empty only in `recover` mode). */
+    readonly rolledBack: readonly Discrepancy[];
+    /** Re-import every fact the checkpoint holds and the journal lost (`recover` mode only). */
+    recoverFromCheckpoint(note: string): { restored: string[] };
     close(): void;
   };
 
@@ -335,7 +369,10 @@ export type FilePaymentJournal = PaymentJournal &
  * a missing or damaged journal is JOURNAL_MISSING / JOURNAL_CORRUPT, so
  * financial history is never silently reset.
  */
-export function openFilePaymentJournal(dir: string, opts: { now?: () => number; afterAuthRecord?: () => void } = {}): FilePaymentJournal {
+export function openFilePaymentJournal(dir: string, opts: { now?: () => number; afterAuthRecord?: () => void; checkpoint: CheckpointOptions }): FilePaymentJournal {
+  // 0007 (F-NOCK): there is no writable journal without its checkpoint; a writer that omitted it would
+  // consume authorizations the checkpoint never sees, and bypass rollback detection and its lock.
+  if (!opts?.checkpoint?.path) throw new Error("CHECKPOINT_REQUIRED:a writable journal is opened only with its consumption checkpoint");
   const now = opts.now ?? (() => Math.floor(Date.now() / 1000));
   const p = layout(dir);
   assertInitialized(dir);
@@ -358,26 +395,163 @@ export function openFilePaymentJournal(dir: string, opts: { now?: () => number; 
   }
 
   const reader = readFilePaymentJournal(dir);
+  const journalId = journalIdOf(dir);
+
+  // Checkpoint (AUD-02/03/04): verified before anything is served. On any failure every lock is released.
+  const ck = opts.checkpoint;
+  let cp: CheckpointState | undefined;
+  let cpLock: ExclusiveLock | undefined;
+  let rolledBack: Discrepancy[] = [];
+  /** Set when the checkpoint's or the journal's state is not known any more: every write refused until restart. */
+  let broken: string | undefined;
+  {
+    try {
+      // 0007 (F-LOCK): the single-writer lock is ALSO taken on the checkpoint file itself. Unlike
+      // journal.lock, it lives outside the journal's rollback domain and cannot be replaced, renamed or
+      // unlinked (append-only), so a journal directory swapped under a running executor cannot admit a
+      // second writer (a second executor, or journal-cli recover/resolve/seal).
+      try {
+        cpLock = acquireExclusiveLock(ck.path, { create: false });
+      } catch (err) {
+        if (err instanceof LockError && err.code === "LOCK_HELD") throw new CheckpointError("CHECKPOINT_LOCKED", ck.path);
+        throw new CheckpointError((err as Error).message.includes("ENOENT") ? "CHECKPOINT_MISSING" : "CHECKPOINT_UNAVAILABLE", (err as Error).message);
+      }
+      const mode = ck.mode ?? "normal";
+      cp = loadCheckpointFor(ck.path, journalId, { requireAppendOnly: ck.requireAppendOnly, allowUnsealed: mode === "seal" });
+      if (mode === "seal") {
+        if (cp.entries.length > 0) throw new CheckpointError("CHECKPOINT_ALREADY_SEALED", ck.path);
+        // An interrupted seal left only torn lines (0007, F-TORN-GENESIS): the genesis acknowledges them.
+        const prefix = cp.tornLines.map(sha256hex);
+        cp = appendCheckpoint(ck.path, cp, { kind: "GENESIS", format: EXECUTOR_ANCHOR_FORMAT, journal_id: journalId, ...(prefix.length ? { torn_prefix: prefix } : {}) });
+      }
+      // One TORN acknowledges every torn line before it, also several from repeated crashes (0007, F-TORN2).
+      if (cp.tornLines.length > 0) cp = appendCheckpoint(ck.path, cp, { kind: "TORN", torn_sha256s: cp.tornLines.map(sha256hex) });
+      const view = { ...reader, journalId };
+      const cmp = compareJournal(cp, view);
+      rolledBack = cmp.rolledBack;
+      if (rolledBack.length > 0 && mode !== "recover") {
+        throw new CheckpointError(
+          "JOURNAL_ROLLBACK_DETECTED",
+          `${rolledBack.length} checkpointed fact(s) missing from the journal: ${rolledBack.slice(0, 5).map((d) => `${d.kind} ${d.id} (${d.detail})`).join("; ")}`,
+        );
+      }
+      // Journal ahead of the checkpoint: a crash between the journal write and its checkpoint entry. Never acted on.
+      if (rolledBack.length === 0) for (const b of cmp.catchUp) cp = appendCheckpoint(ck.path, cp, b);
+    } catch (err) {
+      cpLock?.release();
+      lock.release();
+      throw err;
+    }
+  }
+
   const needsReconciliation = reader
     .list()
     .filter((r) => (r.state === "STARTED" || r.state === "UNKNOWN") && r.resolution === undefined);
-  audit({ event: "OPEN", pid: process.pid, needs_reconciliation: needsReconciliation.map((r) => r.intent_hash) });
+  audit({ event: "OPEN", pid: process.pid, needs_reconciliation: needsReconciliation.map((r) => r.intent_hash), ...(rolledBack.length ? { rolled_back: rolledBack } : {}) });
 
   let closed = false;
   function writable(): void {
     if (closed) throw new Error("JOURNAL_CLOSED");
+    if (broken) throw new Error(`JOURNAL_UNAVAILABLE:${broken}`);
+    if ((ck.mode ?? "normal") === "recover" && rolledBack.length > 0) throw new Error("JOURNAL_RECOVERY_REQUIRED");
     lock.assertOwned();
+    cpLock!.assertOwned();
+  }
+
+  /** Append the checkpoint entry for a journal write that just completed; until it is durable nothing may act on it. */
+  function checkpoint(body: AnchorBody): void {
+    if (!cp) throw new Error("JOURNAL_CHECKPOINT_UNAVAILABLE:not loaded");
+    try {
+      ck.beforeAppend?.(body);
+      cp = appendCheckpoint(ck.path, cp, body);
+    } catch (err) {
+      broken = `checkpoint append failed: ${(err as Error).message}`;
+      throw new Error(`JOURNAL_CHECKPOINT_UNAVAILABLE:${(err as Error).message}`);
+    }
+  }
+
+  /** A checkpointed consumption that the journal no longer holds can only come from a journal rollback while running. */
+  function assertNotRolledBack(authId: string): void {
+    if (!cp!.consumes.has(authId) || reader.auth(authId) !== undefined) return;
+    broken = `journal rollback detected: auth ${authId} was consumed (checkpoint) but is absent from the journal`;
+    ck?.onRollback?.(broken);
+    throw new Error(`JOURNAL_ROLLBACK_DETECTED:${broken}`);
   }
 
   return {
     ...reader,
     needsReconciliation,
-    journalId: journalIdOf(dir),
+    journalId,
+    get rolledBack() {
+      return rolledBack;
+    },
+    recoverFromCheckpoint(note: string) {
+      if (closed) throw new Error("JOURNAL_CLOSED");
+      if (!cp || (ck.mode ?? "normal") !== "recover") throw new Error("JOURNAL_RECOVERY_NOT_ENABLED");
+      if (broken) throw new Error(`JOURNAL_UNAVAILABLE:${broken}`);
+      lock.assertOwned();
+      cpLock!.assertOwned();
+      const restored: string[] = [];
+      const at = now();
+      for (const c of cp.consumes.values()) {
+        if (reader.auth(c.auth_id) === undefined) {
+          createDurable(join(p.auths, authKey(c.auth_id)), JSON.stringify({ auth_id: c.auth_id, intent_hash: c.intent_hash, disposition: c.disposition, detail: "RECOVERED_FROM_CHECKPOINT", at } satisfies AuthRecord));
+          restored.push(`auth ${c.auth_id} ${c.disposition}`);
+        }
+        const f = cp.finals.get(c.intent_hash);
+        const request = c.request ?? f?.request;
+        const claimId = c.claim_id ?? f?.claim_id;
+        // 0007 (F-LEGACY): a legacy intent (no claim id) is rebuilt too, from the request the checkpoint keeps.
+        if (c.disposition === "RESERVED" && request !== undefined && reader.inspect(c.intent_hash) === undefined) {
+          const res = cp.resolved.get(c.intent_hash);
+          // Without a checkpointed final state the outcome is unknown: the claim may have paid (D5: never NOT_EXECUTED).
+          const rec: PaymentJournalRecord = {
+            intent_hash: c.intent_hash,
+            auth_id: c.auth_id,
+            ...(claimId !== undefined ? { claim_id: claimId } : {}),
+            state: f?.state ?? "UNKNOWN",
+            detail: f?.detail ?? "RECOVERED_FROM_CHECKPOINT:outcome lost by a journal rollback; the payment may have executed",
+            request,
+            ...(f?.receipt !== undefined ? { receipt: f.receipt } : {}),
+            started_at: at,
+            updated_at: at,
+            ...(res !== undefined ? { resolution: res.resolution } : {}),
+          };
+          createDurable(intentPath(dir, c.intent_hash), JSON.stringify(rec));
+          restored.push(`intent ${c.intent_hash} ${rec.state}`);
+        }
+      }
+      for (const f of cp.finals.values()) {
+        const r = reader.inspect(f.intent_hash);
+        if (r === undefined || r.detail === "JOURNAL_RECORD_UNREADABLE" || r.state === f.state) continue;
+        if (r.state !== "STARTED") throw new Error(`CHECKPOINT_CONFLICT:intent ${f.intent_hash} is ${r.state} in the journal, ${f.state} in the checkpoint`);
+        const { detail: _d, receipt: _r, ...rest } = r;
+        replaceDurable(intentPath(dir, f.intent_hash), JSON.stringify({ ...rest, state: f.state, ...(f.detail !== undefined ? { detail: f.detail } : {}), ...(f.receipt !== undefined ? { receipt: f.receipt } : {}), updated_at: at }));
+        restored.push(`intent ${f.intent_hash} STARTED->${f.state}`);
+      }
+      for (const res of cp.resolved.values()) {
+        const r = reader.inspect(res.intent_hash);
+        if (r === undefined || r.detail === "JOURNAL_RECORD_UNREADABLE" || r.resolution !== undefined) continue;
+        replaceDurable(intentPath(dir, res.intent_hash), JSON.stringify({ ...r, resolution: res.resolution }));
+        restored.push(`resolution ${res.intent_hash}`);
+      }
+      audit({ event: "RECOVERED_FROM_CHECKPOINT", note, restored });
+      cp = appendCheckpoint(ck.path, cp, { kind: "RECOVERED", note, restored });
+      const after = compareJournal(cp, { ...reader, journalId });
+      if (after.rolledBack.length > 0) {
+        broken = "recovery incomplete";
+        throw new Error(`JOURNAL_RECOVERY_INCOMPLETE:${after.rolledBack.map((d) => `${d.kind} ${d.id}`).join("; ")}`);
+      }
+      for (const b of after.catchUp) cp = appendCheckpoint(ck.path, cp, b);
+      rolledBack = [];
+      return { restored };
+    },
     reserve({ intent_hash, auth_id, request, claim_id }) {
       writable();
       const path = intentPath(dir, intent_hash);
       const existing = reader.inspect(intent_hash);
       if (existing) return { ok: false, reason: "DUPLICATE_INTENT", prior: existing.state };
+      assertNotRolledBack(auth_id);
       const at = now();
       try {
         createDurable(join(p.auths, authKey(auth_id)), JSON.stringify({ auth_id, intent_hash, disposition: "RESERVED", at } satisfies AuthRecord));
@@ -392,14 +566,20 @@ export function openFilePaymentJournal(dir: string, opts: { now?: () => number; 
       try {
         createDurable(path, JSON.stringify(record));
       } catch (err) {
-        if (isEexist(err)) return { ok: false, reason: "DUPLICATE_INTENT", prior: reader.inspect(intent_hash)?.state ?? "UNKNOWN" };
+        if (isEexist(err)) {
+          checkpoint({ kind: "CONSUME", auth_id, intent_hash, disposition: "RESERVED" });
+          return { ok: false, reason: "DUPLICATE_INTENT", prior: reader.inspect(intent_hash)?.state ?? "UNKNOWN" };
+        }
         throw err;
       }
       audit({ event: "STARTED", intent_hash, auth_id });
+      // Durable outside the journal's rollback domain before the claim is requested or `pay` can run.
+      checkpoint({ kind: "CONSUME", auth_id, intent_hash, disposition: "RESERVED", claim_id, request });
       return { ok: true };
     },
     consume({ auth_id, intent_hash, disposition, detail }) {
       writable();
+      assertNotRolledBack(auth_id);
       const rec: AuthRecord = { auth_id, intent_hash, disposition, ...(detail !== undefined ? { detail } : {}), at: now() };
       try {
         createDurable(join(p.auths, authKey(auth_id)), JSON.stringify(rec));
@@ -408,14 +588,18 @@ export function openFilePaymentJournal(dir: string, opts: { now?: () => number; 
         throw err;
       }
       audit({ event: disposition, auth_id, intent_hash, ...(detail !== undefined ? { detail } : {}) });
+      // Durable outside the journal's rollback domain before the rejection is answered or VOIDed (AUD-02).
+      checkpoint({ kind: "CONSUME", auth_id, intent_hash, disposition });
       return rec;
     },
     record(intentHash, state, detail, receipt) {
       writable();
       const prev = reader.inspect(intentHash);
       if (!prev) throw new Error("JOURNAL_NO_SUCH_INTENT");
-      replaceDurable(intentPath(dir, intentHash), JSON.stringify(finalRecord(prev, state, detail, receipt, now())));
+      const next = finalRecord(prev, state, detail, receipt, now());
+      replaceDurable(intentPath(dir, intentHash), JSON.stringify(next));
       audit({ event: state, intent_hash: intentHash, ...(detail !== undefined ? { detail } : {}) });
+      checkpoint(finalBody(next));
     },
     resolve(intentHash, evidence, note) {
       writable();
@@ -427,6 +611,8 @@ export function openFilePaymentJournal(dir: string, opts: { now?: () => number; 
       const next: PaymentJournalRecord = { ...prev, resolution: { verdict: "SETTLED", amount: evidence.amount, evidence, note, at: now() } };
       replaceDurable(intentPath(dir, intentHash), JSON.stringify(next));
       audit({ event: "RESOLVED", intent_hash: intentHash, verdict: "SETTLED", amount: evidence.amount, reference: evidence.reference, note });
+      // The recovery decision is kept outside the journal's rollback domain (append-only, hash-chained).
+      checkpoint({ kind: "RESOLVED", intent_hash: intentHash, resolution: next.resolution! });
       return next;
     },
     ack(authId, outcome) {
@@ -440,6 +626,7 @@ export function openFilePaymentJournal(dir: string, opts: { now?: () => number; 
     close() {
       if (closed) return;
       closed = true;
+      cpLock?.release();
       lock.release();
     },
   };

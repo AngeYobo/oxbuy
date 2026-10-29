@@ -867,6 +867,15 @@ const restoreJournal = (s: IsolatedSystem, snap: string) => {
   assert.equal(sudo(["cp", "-a", snap, s.paths.journalDir]).status, 0);
 };
 const paidTotal = (s: IsolatedSystem) => s.ledger().reduce((t, e) => t + BigInt(e.receipt.amount), 0n);
+/** AUD-03 remediation: operator recovery of a rolled-back journal from its checkpoint (executor stopped). */
+const recoverJournal = (s: IsolatedSystem) => {
+  const r = s.runAsSync("executor", [NODE, join(s.paths.apps.executor, "src/isolation/journal-cli.ts"), s.paths.journalDir, "recover", "test: journal restored from a snapshot"]);
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout) as { outcome: string; found: string[]; restored: string[] };
+};
+/** A claim for `a` with a fresh claim id, signed with the real executor key and sent over the settle channel. */
+const directClaim = async (s: IsolatedSystem, a: { authorization: any }) =>
+  (await settleAs(s, "executor", "claim-valid", { type: "oxdeai-celo-poc/execution-claim/v1", auth_id: a.authorization.auth_id, intent_hash: a.authorization.intent_hash, journal_id: journalId(s), claim_id: "e".repeat(32) }))?.body;
 
 test("M1-a regression (review finding M-1): journal rollback after a pre-execution rejection, plus a gateway restart, never makes the authorization payable again", opts, async () => {
   const s = await launch({ policyStateRoot: policyRoot("10000"), executorStateRoot: executorRoot() });
@@ -890,16 +899,22 @@ test("M1-a regression (review finding M-1): journal rollback after a pre-executi
   // 6-7. Restore the older journal; restart the executor (no fault) and the gateway (its replay cache is gone).
   await s.stopExecutor();
   restoreJournal(s, snap);
+  assert.equal(s.journal().auth(id), undefined, "the restored journal no longer knows the authorization");
+  // AUD-03 remediation: the rollback is detected and the executor refuses to serve until it is recovered.
+  await assert.rejects(s.startExecutor(), /JOURNAL_ROLLBACK_DETECTED/);
+  const rec = recoverJournal(s);
+  assert.equal(rec.restored.length, 1, JSON.stringify(rec));
   await s.startExecutor();
   await s.restartGateway();
-  assert.equal(s.journal().auth(id), undefined, "the restored journal no longer knows the authorization");
+  assert.equal(s.journal().auth(id)?.disposition, "REJECTED_BEFORE_EXECUTION", "the consumption is back, from the checkpoint");
   assert.ok(Math.floor(Date.now() / 1000) < a.authorization.expiry, "the authorization is still valid");
-  // 8. Replay the original authorization: the auth service refuses the claim; nothing is paid.
+  // 8. Replay the original authorization: refused by the recovered journal; the claim boundary refuses it too.
   const r2 = await submit(s, a);
   assert.notEqual(r2.decision, "ALLOW", JSON.stringify(r2));
-  assert.match(JSON.stringify(r2), /CLAIM_REFUSED/);
+  assert.match(JSON.stringify(r2), /REPLAY/);
+  assert.match((await directClaim(s, a)).reason, /CLAIM_REFUSED:NOT_ELIGIBLE:RELEASED/, "defence in depth: the auth service never grants a claim for it");
   assert.equal(s.ledger().length, 0, "the replayed authorization paid nothing");
-  assert.equal(s.journal().inspect(a.authorization.intent_hash)?.state, "CLAIM_REFUSED");
+  assert.equal(s.journal().inspect(a.authorization.intent_hash), undefined, "the replay never reached a claim");
   assert.equal(reservation(s, id)!.state, "RELEASED");
   assertConsistent(s, "M1-a after replay");
   // 9. Further payment activity: the released capacity is spent exactly once, never beyond the budget.
@@ -928,13 +943,21 @@ test("M1-b journal rollback after a successful claim, before the outcome report 
   assert.equal(claimed.claim?.claim_id, s.ledger()[0]!.claim_id, "paid under its committed claim");
   // Roll the journal back to before the consumption; restart everything the executor side owns, and the gateway.
   restoreJournal(s, snap);
+  await assert.rejects(s.startExecutor(), /JOURNAL_ROLLBACK_DETECTED/, "AUD-03: detected");
+  recoverJournal(s);
+  const lost = s.journal().inspect(a.authorization.intent_hash)!;
+  assert.deepEqual([lost.state, lost.claim_id], ["UNKNOWN", claimed.claim!.claim_id], "AUD-04: the lost outcome is restored as UNKNOWN under its claim, never as non-execution");
   await s.startExecutor();
+  // 0007 (deterministic M1-b): the recovered UNKNOWN outcome is reported once at startup and moves the claim to UNCERTAIN.
+  await waitFor("recovered outcome reported UNCERTAIN", () => reservation(s, id)?.state === "UNCERTAIN");
   await s.restartGateway();
   const r2 = await submit(s, a);
   assert.notEqual(r2.decision, "ALLOW", JSON.stringify(r2));
-  assert.match(JSON.stringify(r2), /CLAIM_REFUSED.*EXECUTING/);
+  assert.match(JSON.stringify(r2), /AUTH_REPLAY|DUPLICATE_PAYMENT_ATTEMPT/);
+  assert.match((await directClaim(s, a)).reason, /CLAIM_REFUSED:NOT_ELIGIBLE:UNCERTAIN/, "defence in depth");
   assert.equal(s.ledger().length, 1, "no second payment");
-  assert.equal(reservation(s, id)!.state, "EXECUTING", "still charged under the original claim");
+  assert.equal(reservation(s, id)!.state, "UNCERTAIN", "still charged under the original claim, never released");
+  assert.equal(reservation(s, id)!.claim?.claim_id, claimed.claim!.claim_id);
   assert.equal(reservation(s, id)!.charged, String(PRICE));
   // Replay after an auth-service restart too.
   await s.restartAuth();
@@ -965,13 +988,16 @@ test("M1-c claim persistence and supported recovery: a claim survives auth resta
   assert.equal(policyCliJson(s, "rebuild").out.outcome, "SAFE_TO_RESUME");
   await s.startAuth();
   assert.equal(reservation(s, id)!.state, "EXECUTING", "the rebuilt state still holds the claim");
-  // Journal rolled back too, gateway restarted: the replay is refused by the claim.
+  // Journal rolled back too, gateway restarted: detected, recovered from the checkpoint, the replay refused.
   restoreJournal(s, snap);
+  await assert.rejects(s.startExecutor(), /JOURNAL_ROLLBACK_DETECTED/);
+  recoverJournal(s);
   await s.startExecutor();
   await s.restartGateway();
   const r = await submit(s, a);
   assert.notEqual(r.decision, "ALLOW", JSON.stringify(r));
-  assert.match(JSON.stringify(r), /CLAIM_REFUSED/);
+  assert.match(JSON.stringify(r), /AUTH_REPLAY|DUPLICATE_PAYMENT_ATTEMPT/);
+  assert.match((await directClaim(s, a)).reason, /CLAIM_REFUSED:NOT_ELIGIBLE/, "defence in depth");
   assert.equal(s.ledger().length, 0, "never paid");
   assert.notEqual(reservation(s, id)!.state, "RELEASED", "a claim that may have paid is never released");
   assert.equal(spent(policyFile(s)), PRICE);

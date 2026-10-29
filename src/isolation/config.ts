@@ -11,6 +11,8 @@ import type { AuthorizationAuthority, KeySet } from "@oxdeai/core";
 
 /** Fault injection, set only by the operator in the executor's private config. */
 export type ExecutorFaults = {
+  /** SIGKILL after a journal write, before its checkpoint entry is appended (AUD-03 crash window). */
+  readonly crashBeforeCheckpoint?: boolean;
   /** SIGKILL the executor after STARTED is journaled, before `pay`. */
   readonly crashBeforePay?: boolean;
   /** SIGKILL the executor after `pay` settled, before the journal records it. */
@@ -46,6 +48,8 @@ export type ExecutorConfig = {
   readonly internalToken: string;
   /** Persistent, operator-initialized (Phase 2C; N2): <executorStateRoot>/journal. */
   readonly journalDir: string;
+  /** Append-only consumption checkpoint of that journal (AUD-02/03/04): <executorStateRoot>.anchor/<journal_id>.log. */
+  readonly anchorPath: string;
   readonly walletKeyPath: string;
   /** Persistent (Phase 2C; N2): <executorStateRoot>/ledger.jsonl. */
   readonly ledgerPath: string;

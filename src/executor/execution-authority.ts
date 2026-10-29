@@ -33,7 +33,11 @@ export interface ExecutionAuthority {
 }
 
 /** What the authorization service answers (authorization-service.ts `claim` / `voidAuthorization`). */
-export type ClaimResult = { readonly status: "CLAIMED"; readonly auth_id: string; readonly intent_hash: string; readonly claim_id: string } | { readonly status: "REJECTED"; readonly reason: string };
+export type ClaimResult =
+  | { readonly status: "CLAIMED"; readonly auth_id: string; readonly intent_hash: string; readonly claim_id: string }
+  | { readonly status: "REJECTED"; readonly reason: string }
+  /** The service could not confirm whether the claim committed (policy-state failure): never definitive. */
+  | { readonly status: "UNCONFIRMED"; readonly reason: string };
 export type VoidResult = { readonly status: "APPLIED" | "ALREADY_APPLIED"; readonly released: string } | { readonly status: "REJECTED"; readonly reason: string };
 
 /** Accept a claim answer only if it acknowledges exactly this attempt's claim. */
@@ -45,6 +49,8 @@ export function interpretClaim(c: ClaimRequest, httpStatus: number, body: unknow
   }
   // The service answered and refused: nothing was committed for this claim.
   if ((httpStatus === 200 || httpStatus === 403) && b.status === "REJECTED") return { ok: false, definitive: true, reason: String(b.reason) };
+  // The service answered but cannot confirm the commit's outcome: the claim may be in place.
+  if (httpStatus === 200 && b.status === "UNCONFIRMED") return { ok: false, definitive: false, reason: `CLAIM_UNCONFIRMED:${String(b.reason)}` };
   return { ok: false, definitive: false, reason: `CLAIM_UNAVAILABLE:http ${httpStatus}` };
 }
 

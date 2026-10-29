@@ -248,6 +248,12 @@ export function createAuthorizationService(options: AuthorizationServiceOptions)
    * committed before it is acknowledged, only while the authorization is valid
    * on this service's clock (`now < expiry - minRemainingSeconds`). At most
    * one claim per authorization is ever granted. Never throws.
+   *
+   * REJECTED is definitive: nothing was committed for this claim. A policy-state
+   * failure (load, commit, or an unconfirmed commit whose new state may already
+   * be in place and is completed by the next start) is UNCONFIRMED instead, so
+   * the executor abandons the attempt (positive record + VOID) rather than
+   * treating the claim as never committed (audit finding AUD-01).
    */
   async function claim(signed: unknown): Promise<ClaimResult> {
     let c;
@@ -257,7 +263,7 @@ export function createAuthorizationService(options: AuthorizationServiceOptions)
       return { status: "REJECTED", reason: (err as Error).message };
     }
     const t = await transition(c.auth_id, c.journal_id, (rec, now) => applyClaim(rec, c, now, options.minRemainingSeconds ?? 0));
-    if (!t.ok) return { status: "REJECTED", reason: t.reason };
+    if (!t.ok) return t.reason.startsWith("POLICY_STATE_") ? { status: "UNCONFIRMED", reason: t.reason } : { status: "REJECTED", reason: t.reason };
     return { status: "CLAIMED", auth_id: c.auth_id, intent_hash: c.intent_hash, claim_id: c.claim_id };
   }
 

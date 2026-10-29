@@ -9,6 +9,13 @@
  *   node journal-cli.ts <journalDir> pending
  *   node journal-cli.ts <journalDir> show <intent_hash>
  *   node journal-cli.ts <journalDir> resolve <intent_hash> SETTLED <note>
+ *   node journal-cli.ts <journalDir> seal                 (once; the checkpoint must exist and be empty)
+ *   node journal-cli.ts <journalDir> verify               (read-only: journal against its checkpoint)
+ *   node journal-cli.ts <journalDir> recover <note>       (re-import facts lost by a journal rollback)
+ *
+ * Checkpoint (AUD-02/03/04, src/executor/executor-anchor.ts): `<executorStateRoot>.anchor/<journal_id>.log`.
+ * `resolve`, `seal` and `recover` take the journal's writer lock (executor stopped) and append to the
+ * checkpoint; a missing, unsealed, foreign, or not append-only checkpoint refuses them.
  *
  * `list`, `pending`, and `show` are read-only and lock-free. `resolve` takes
  * the journal's single-writer lock, so the executor must be stopped first. It
@@ -26,7 +33,8 @@
  */
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { verifySettlementEvidence } from "../adapters/mock-buy/mock-settlement.ts";
-import { initFilePaymentJournal, openFilePaymentJournal, readFilePaymentJournal } from "../executor/payment-journal.ts";
+import { compareJournal, executorAnchorPathFor, loadCheckpointFor } from "../executor/executor-anchor.ts";
+import { initFilePaymentJournal, journalIdOf, openFilePaymentJournal, readFilePaymentJournal } from "../executor/payment-journal.ts";
 
 const [dir, command, intentHash, verdict, ...note] = process.argv.slice(2);
 if (!dir || !command) throw new Error("usage: journal-cli <journalDir> list|pending|show|resolve ...");
@@ -38,6 +46,7 @@ if (command === "init") {
   process.exit(0);
 }
 const reader = readFilePaymentJournal(dir);
+const checkpointPath = () => executorAnchorPathFor(resolvePath(dir), journalIdOf(dir));
 switch (command) {
   case "list":
     out = reader.list();
@@ -55,7 +64,7 @@ switch (command) {
     if (verdict === "NOT_SETTLED") throw new Error("RESOLUTION_REFUSED:no positive evidence of non-execution exists; the reservation stays charged");
     if (verdict !== "SETTLED") throw new Error("verdict must be SETTLED");
     if (note.length === 0) throw new Error("a reconciliation note is required");
-    const journal = openFilePaymentJournal(dir);
+    const journal = openFilePaymentJournal(dir, { checkpoint: { path: checkpointPath() } });
     try {
       const record = journal.inspect(intentHash ?? "");
       if (!record || record.claim_id === undefined) throw new Error("JOURNAL_NOT_RECONCILABLE:no claimed intent");
@@ -66,6 +75,37 @@ switch (command) {
         { intent_hash: record.intent_hash, claim_id: record.claim_id, journal_id: journal.journalId, request: record.request },
       );
       out = journal.resolve(record.intent_hash, evidence, note.join(" "));
+    } finally {
+      journal.close();
+    }
+    break;
+  }
+  case "seal": {
+    const journal = openFilePaymentJournal(dir, { checkpoint: { path: checkpointPath(), mode: "seal" } });
+    journal.close();
+    out = { sealed: checkpointPath(), journal_id: journalIdOf(dir) };
+    break;
+  }
+  case "verify": {
+    // Read-only, lock-free. Outcomes: SAFE_TO_RESUME, ROLLBACK_DETECTED (recover), or a CHECKPOINT_* failure.
+    const journalId = journalIdOf(dir);
+    try {
+      const cp = loadCheckpointFor(checkpointPath(), journalId);
+      const { rolledBack, catchUp } = compareJournal(cp, { ...reader, journalId });
+      out = { outcome: rolledBack.length ? "ROLLBACK_DETECTED" : "SAFE_TO_RESUME", journal_id: journalId, checkpoint: checkpointPath(), entries: cp.entries.length, rolled_back: rolledBack, catch_up: catchUp.length, torn_lines: cp.tornLines.length };
+    } catch (err) {
+      out = { outcome: "CHECKPOINT_FAILURE", journal_id: journalId, checkpoint: checkpointPath(), error: (err as Error).message };
+    }
+    break;
+  }
+  case "recover": {
+    const why = [intentHash, verdict, ...note].filter(Boolean).join(" ");
+    if (!why) throw new Error("a recovery note is required");
+    const journal = openFilePaymentJournal(dir, { checkpoint: { path: checkpointPath(), mode: "recover" } });
+    try {
+      const found = journal.rolledBack.map((d) => `${d.kind} ${d.id} (${d.detail})`);
+      const { restored } = found.length ? journal.recoverFromCheckpoint(why) : { restored: [] };
+      out = { outcome: "SAFE_TO_RESUME", found, restored };
     } finally {
       journal.close();
     }

@@ -22,16 +22,20 @@ const CL = "c".repeat(32);
 
 const dirs: string[] = [];
 const open: FilePaymentJournal[] = [];
+/** 0007 (F-NOCK): a writable journal always has its checkpoint (here a sealed file next to it; no chattr in unit tests). */
+const checkpointOf = (dir: string) => ({ path: join(dir, "..", "checkpoint.log"), requireAppendOnly: false });
 function freshDir(): string {
   // Under /tmp, whose default ACL grants "other" rw- on new files.
   const d = mkdtempSync(join(tmpdir(), "oxdeai-journal-test-"));
   dirs.push(d);
   // Phase 2C: a journal is created once, explicitly, and never implicitly by open.
   initFilePaymentJournal(join(d, "journal"));
+  writeFileSync(join(d, "checkpoint.log"), "");
+  openFilePaymentJournal(join(d, "journal"), { checkpoint: { ...checkpointOf(join(d, "journal")), mode: "seal" } }).close();
   return join(d, "journal");
 }
 function openJ(dir: string): FilePaymentJournal {
-  const j = openFilePaymentJournal(dir);
+  const j = openFilePaymentJournal(dir, { checkpoint: checkpointOf(dir) });
   open.push(j);
   return j;
 }
@@ -73,11 +77,11 @@ test("J3 single writer: a second open fails while the first holds the lock; rele
   // (crash, simultaneous start) are in tests/isolation/financial-integrity.test.ts.
   const dir = freshDir();
   const j = openJ(dir);
-  assert.throws(() => openFilePaymentJournal(dir), /JOURNAL_LOCKED/);
+  assert.throws(() => openFilePaymentJournal(dir, { checkpoint: checkpointOf(dir) }), /JOURNAL_LOCKED/);
   j.close();
   open.pop();
   const k = openJ(dir);
-  assert.throws(() => openFilePaymentJournal(dir), /JOURNAL_LOCKED/);
+  assert.throws(() => openFilePaymentJournal(dir, { checkpoint: checkpointOf(dir) }), /JOURNAL_LOCKED/);
   k.close();
   open.pop();
 });
