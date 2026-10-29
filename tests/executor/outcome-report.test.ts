@@ -161,8 +161,8 @@ test("OR6 concurrent claims for one authorization: exactly one is granted; VOID 
   if (e.decision !== "ALLOW") throw new Error("expected ALLOW");
   const local = createLocalExecutionAuthority(svc, { privateKeyPem: priv, kid: "exec-1" }, JID);
   const eids = { auth_id: e.authorization.auth_id, intent_hash: e.authorization.intent_hash };
-  assert.deepEqual(await local.void({ ...eids, reason: "REJECTED_BEFORE_EXECUTION" }), { acknowledged: true });
-  assert.deepEqual(await local.void({ ...eids, reason: "REJECTED_BEFORE_EXECUTION" }), { acknowledged: true }, "idempotent");
+  assert.deepEqual(await local.void({ ...eids, reason: "REJECTED_BEFORE_EXECUTION" }), { acknowledged: true, final: true });
+  assert.deepEqual(await local.void({ ...eids, reason: "REJECTED_BEFORE_EXECUTION" }), { acknowledged: true, final: true }, "idempotent");
   assert.equal(await spent(), 10000n, "only the voided reservation was released");
   const late = await local.claim({ ...eids, claim_id: C });
   assert.deepEqual(late, { ok: false, definitive: true, reason: "CLAIM_REFUSED:NOT_ELIGIBLE:RELEASED" }, "a voided authorization is never claimable");

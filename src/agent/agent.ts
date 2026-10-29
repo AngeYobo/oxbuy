@@ -31,6 +31,12 @@ export type PurchaseResult = {
   /** Executor reason when reason is UPSTREAM_ERROR or PAYMENT_UNKNOWN. */
   readonly detail?: string;
   readonly receipt?: unknown;
+  /**
+   * DENY from the executor only. true: the authorization service durably confirmed that this authorization can
+   * never be claimed again; the rejection survives any executor restart or state restore. false: nothing was
+   * paid, but the service has not confirmed it; treat the authorization as live until it expires.
+   */
+  readonly final?: boolean;
   readonly auth_id?: string;
   readonly intent_hash?: string;
 };

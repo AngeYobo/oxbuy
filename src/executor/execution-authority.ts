@@ -25,7 +25,13 @@ import { CLAIM_TYPE, signClaim, signVoid, VOID_TYPE } from "./outcome-report.ts"
 export type ClaimRequest = { readonly auth_id: string; readonly intent_hash: string; readonly claim_id: string };
 export type ClaimAnswer = { readonly ok: true } | { readonly ok: false; readonly definitive: boolean; readonly reason: string };
 export type VoidRequest = { readonly auth_id: string; readonly intent_hash: string; readonly reason: VoidReason; readonly claim_id?: string };
-export type VoidAnswer = { readonly acknowledged: boolean; readonly reason?: string };
+/**
+ * `acknowledged`: the service committed this VOID (or already held it).
+ * `final`: the service has durably confirmed that the authorization can no longer be claimed: the VOID was
+ * acknowledged, or it was refused because the reservation already left RESERVED (VOID_NOT_ELIGIBLE:<state>),
+ * which is never re-entered. Only a final answer lets the executor present a rejection as definitive (F-SIBLING).
+ */
+export type VoidAnswer = { readonly acknowledged: boolean; readonly final: boolean; readonly reason?: string };
 
 export interface ExecutionAuthority {
   claim(c: ClaimRequest): Promise<ClaimAnswer>;
@@ -56,8 +62,23 @@ export function interpretClaim(c: ClaimRequest, httpStatus: number, body: unknow
 
 export function interpretVoid(httpStatus: number, body: unknown): VoidAnswer {
   const b = (typeof body === "object" && body !== null ? body : {}) as Partial<VoidResult & { reason: string }>;
-  if (httpStatus === 200 && (b.status === "APPLIED" || b.status === "ALREADY_APPLIED")) return { acknowledged: true };
-  return { acknowledged: false, reason: b.reason ?? `http ${httpStatus}` };
+  if (httpStatus === 200 && (b.status === "APPLIED" || b.status === "ALREADY_APPLIED")) return { acknowledged: true, final: true };
+  const reason = b.reason ?? `http ${httpStatus}`;
+  // The service answered that the reservation is no longer RESERVED (or is a legacy one that can never be claimed).
+  // (reservations.ts applyVoid -> ReportRejected("VOID_NOT_ELIGIBLE:<state>"), message "REPORT_REJECTED:VOID_NOT_ELIGIBLE:<state>")
+  const final = httpStatus === 200 && b.status === "REJECTED" && typeof b.reason === "string" && /^REPORT_REJECTED:VOID_NOT_ELIGIBLE:[A-Z_]+$/.test(b.reason);
+  return { acknowledged: false, final, reason };
+}
+
+/**
+ * A definitive claim refusal that also proves the authorization can never be claimed again: the reservation
+ * left RESERVED, is a legacy one, or its authorization expired on the service's clock. Other definitive
+ * refusals (binding, domain, unknown reservation, a dead claim id) say nothing about later claims.
+ */
+export function claimRefusalIsFinal(reason: string): boolean {
+  // reservations.ts applyClaim -> ClaimRefused(code), message "CLAIM_REFUSED:<code>"
+  if (reason === "CLAIM_REFUSED:AUTH_EXPIRED_AT_CLAIM") return true;
+  return /^CLAIM_REFUSED:NOT_ELIGIBLE:[A-Z_]+$/.test(reason) && reason !== "CLAIM_REFUSED:NOT_ELIGIBLE:DEAD_CLAIM";
 }
 
 /** In-process harness transport (src/system.ts and unit tests). */

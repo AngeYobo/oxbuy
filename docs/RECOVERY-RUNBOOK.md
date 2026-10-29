@@ -164,6 +164,16 @@ no local restore can roll back.
   once, within its binding and budget, and is charged once. Prevention is operational: the backup scope
   above, and never re-arming `+a`. Closing it needs a witness outside the executor that is reachable when the
   rejection happens. None exists in this PoC.
+
+  **Since 0008, that rejection is never presented as final.** Every executor DENY carries `final`:
+  - `final: true`: the auth service durably confirmed that the authorization can never be claimed again
+    (VOID acknowledged, or a claim refused because the reservation already left RESERVED or expired). That
+    rejection survives any executor restore, the checkpoint included (test RB6-a).
+  - `final: false`: nothing was paid, but the auth service has not confirmed it (outage, timeout, journal
+    failure, a replay answer, an unauthentic request). Treat the authorization as live until it expires.
+    After a full executor restore it can still pay once, as above (test RB6-b).
+
+  0008 does not change any payment or budget behaviour; it removes a guarantee the answer used to imply.
 - A journal rolled back **before** it was sealed (migration).
 - A fact written to the journal and lost in a crash before its checkpoint entry, followed by a rollback.
   That fact was never acted on (the claim and `pay` come after the checkpoint), so nothing becomes payable

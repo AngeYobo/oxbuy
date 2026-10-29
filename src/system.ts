@@ -210,6 +210,7 @@ export function createLocalSystem(opts: { startTime?: number; initialState?: Sta
         status: r.status,
         reason: r.body.reason,
         detail: r.body.detail,
+        ...(r.body.final !== undefined ? { final: r.body.final } : {}),
         receipt: r.body.receipt,
         auth_id: r.body.auth_id,
         intent_hash: r.body.intent_hash,

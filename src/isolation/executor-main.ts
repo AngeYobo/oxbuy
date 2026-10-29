@@ -104,11 +104,11 @@ const authority: ExecutionAuthority = {
     try {
       const res = await settlePost(config.settleSocketPath, config.proofDir, "/v1/void", { void: signed }, config.claimTimeoutMs);
       const answer = interpretVoid(res.status, res.body);
-      emit({ event: "void", auth_id: v.auth_id, reason: v.reason, acknowledged: answer.acknowledged, detail: answer.reason });
+      emit({ event: "void", auth_id: v.auth_id, reason: v.reason, acknowledged: answer.acknowledged, final: answer.final, detail: answer.reason });
       return answer;
     } catch (err) {
       emit({ event: "void", auth_id: v.auth_id, reason: v.reason, acknowledged: false, detail: (err as Error).message });
-      return { acknowledged: false, reason: (err as Error).message };
+      return { acknowledged: false, final: false, reason: (err as Error).message };
     }
   },
 };
