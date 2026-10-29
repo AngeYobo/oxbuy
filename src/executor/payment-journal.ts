@@ -7,23 +7,31 @@
  *   RESERVED                   consumed for a payment attempt (an intent record follows);
  *   REJECTED_BEFORE_EXECUTION  authentic authorization refused by the executor's own
  *                              pre-payment checks; `pay` was never called;
- *   CANCELLED                  consumed unused at the authorization service's request
- *                              (e.g. expired or never delivered); `pay` was never called.
+ *   CANCELLED                  Phase 2C only (no longer written): consumed unused at the
+ *                              authorization service's request; `pay` was never called.
+ *                              Since Phase 2D the authorization service releases expired,
+ *                              unclaimed reservations itself.
  * Once an auth_id is consumed it can never be used again (AUTH_REPLAY).
  *
- * Per intent (`intents/`), the payment state:
- *   STARTED                 reserved and about to call (or calling) `pay`;
+ * Per intent (`intents/`), the payment state, with the execution claim id
+ * (Phase 2D) sent to the authorization service for this attempt:
+ *   STARTED                 reserved; the claim is being requested, or `pay` is (about to be) running;
  *   SETTLED                 `pay` returned a receipt that matched the binding;
  *   REFUSED_BEFORE_SIGNING  `pay` threw PaymentRefusedError (nothing signed);
  *   UNKNOWN                 `pay` was invoked and the outcome is not a
- *                           verified settlement.
+ *                           verified settlement;
+ *   CLAIM_REFUSED           the authorization service refused the claim; `pay` was never called;
+ *   CLAIM_ABANDONED         the claim's answer was lost or failed; this attempt will
+ *                           never call `pay` (a positive record, written before giving up).
  *
  * `reserve` is the only way to reach STARTED and it is atomic: it consumes the
  * auth_id and creates the intent record, or fails without calling `pay`. An
  * intent is never reserved twice. A record left in STARTED (for example by a
  * crash) stays STARTED: nothing here converts it to a definitive outcome. An
- * operator may attach a `resolution` to a STARTED or UNKNOWN record after
- * reconciling it out of band; the state itself is never rewritten.
+ * operator may attach a `resolution` to a STARTED or UNKNOWN record, only
+ * with verified settlement evidence (src/isolation/journal-cli.ts); the state
+ * itself is never rewritten. There is no non-execution resolution: missing
+ * evidence of a payment is not evidence of no payment.
  *
  * Two implementations:
  *   - `createInMemoryPaymentJournal`: in-process test harness only;
@@ -50,15 +58,19 @@ import type { PurchaseRequest } from "../agent/purchase-request.ts";
 import { appendDurable, createDurable, fsyncDir, isEexist, replaceDurable } from "../durable/durable-file.ts";
 import { acquireExclusiveLock, LockError, type ExclusiveLock } from "../durable/exclusive-lock.ts";
 
-export type PaymentJournalState = "STARTED" | "SETTLED" | "REFUSED_BEFORE_SIGNING" | "UNKNOWN";
+export type PaymentJournalState = "STARTED" | "SETTLED" | "REFUSED_BEFORE_SIGNING" | "UNKNOWN" | "CLAIM_REFUSED" | "CLAIM_ABANDONED";
 export type PaymentJournalEntry = { readonly state: PaymentJournalState; readonly detail?: string };
 export type AuthDisposition = "RESERVED" | "REJECTED_BEFORE_EXECUTION" | "CANCELLED";
 
-export type Resolution = { readonly verdict: "SETTLED" | "NOT_SETTLED"; readonly note: string; readonly at: number };
+/** Settlement evidence verified by the executor identity (mock: a MAC'd ledger entry, src/adapters/mock-buy/mock-settlement.ts). */
+export type SettlementEvidence = { readonly kind: "MOCK_LEDGER_MAC"; readonly reference: string; readonly mac: string; readonly amount: string };
+export type Resolution = { readonly verdict: "SETTLED"; readonly amount: string; readonly evidence: SettlementEvidence; readonly note: string; readonly at: number };
 
 export type PaymentJournalRecord = {
   readonly intent_hash: string;
   readonly auth_id: string;
+  /** Execution claim requested for this attempt (Phase 2D). Absent on legacy records. */
+  readonly claim_id?: string;
   readonly state: PaymentJournalState;
   readonly detail?: string;
   readonly request: PurchaseRequest;
@@ -87,7 +99,7 @@ export interface PaymentJournal {
    * so two requests in one process cannot interleave. Throws on storage
    * failure; the caller must then not call `pay`.
    */
-  reserve(entry: { intent_hash: string; auth_id: string; request: PurchaseRequest }): Reservation;
+  reserve(entry: { intent_hash: string; auth_id: string; request: PurchaseRequest; claim_id: string }): Reservation;
   /**
    * Consume `auth_id` without any payment (REJECTED_BEFORE_EXECUTION or
    * CANCELLED). Returns the auth's existing record if it was already consumed.
@@ -132,13 +144,13 @@ export function createInMemoryPaymentJournal(now: () => number = () => Math.floo
   const records = new Map<string, PaymentJournalRecord>();
   const auths = new Map<string, AuthRecord>();
   return {
-    reserve({ intent_hash, auth_id, request }) {
+    reserve({ intent_hash, auth_id, request, claim_id }) {
       const prior = records.get(intent_hash);
       if (prior) return { ok: false, reason: "DUPLICATE_INTENT", prior: prior.state };
       if (auths.has(auth_id)) return { ok: false, reason: "AUTH_REPLAY" };
       const at = now();
       auths.set(auth_id, { auth_id, intent_hash, disposition: "RESERVED", at });
-      records.set(intent_hash, { intent_hash, auth_id, state: "STARTED", request, started_at: at, updated_at: at });
+      records.set(intent_hash, { intent_hash, auth_id, claim_id, state: "STARTED", request, started_at: at, updated_at: at });
       return { ok: true };
     },
     consume({ auth_id, intent_hash, disposition, detail }) {
@@ -306,8 +318,8 @@ export function readFilePaymentJournal(dir: string) {
 
 export type FilePaymentJournal = PaymentJournal &
   ReturnType<typeof readFilePaymentJournal> & {
-    /** Operator reconciliation of a STARTED or UNKNOWN record. */
-    resolve(intentHash: string, verdict: Resolution["verdict"], note: string): PaymentJournalRecord;
+    /** Operator reconciliation of a STARTED or UNKNOWN record, with settlement evidence the caller verified. */
+    resolve(intentHash: string, evidence: SettlementEvidence, note: string): PaymentJournalRecord;
     /** Durably note that the auth service acknowledged this outcome report. */
     ack(authId: string, outcome: string): void;
     /** Records still STARTED or UNKNOWN with no resolution, found at open. */
@@ -361,7 +373,7 @@ export function openFilePaymentJournal(dir: string, opts: { now?: () => number; 
     ...reader,
     needsReconciliation,
     journalId: journalIdOf(dir),
-    reserve({ intent_hash, auth_id, request }) {
+    reserve({ intent_hash, auth_id, request, claim_id }) {
       writable();
       const path = intentPath(dir, intent_hash);
       const existing = reader.inspect(intent_hash);
@@ -376,7 +388,7 @@ export function openFilePaymentJournal(dir: string, opts: { now?: () => number; 
       // A crash here leaves the auth consumed (RESERVED) with no intent record:
       // `pay` is only ever called after the STARTED record below is durable.
       opts.afterAuthRecord?.();
-      const record: PaymentJournalRecord = { intent_hash, auth_id, state: "STARTED", request, started_at: at, updated_at: at };
+      const record: PaymentJournalRecord = { intent_hash, auth_id, claim_id, state: "STARTED", request, started_at: at, updated_at: at };
       try {
         createDurable(path, JSON.stringify(record));
       } catch (err) {
@@ -405,15 +417,16 @@ export function openFilePaymentJournal(dir: string, opts: { now?: () => number; 
       replaceDurable(intentPath(dir, intentHash), JSON.stringify(finalRecord(prev, state, detail, receipt, now())));
       audit({ event: state, intent_hash: intentHash, ...(detail !== undefined ? { detail } : {}) });
     },
-    resolve(intentHash, verdict, note) {
+    resolve(intentHash, evidence, note) {
       writable();
       const prev = reader.inspect(intentHash);
       if (!prev) throw new Error("JOURNAL_NO_SUCH_INTENT");
       if (prev.state !== "STARTED" && prev.state !== "UNKNOWN") throw new Error(`JOURNAL_NOT_RECONCILABLE:${prev.state}`);
       if (prev.resolution) throw new Error("JOURNAL_ALREADY_RESOLVED");
-      const next: PaymentJournalRecord = { ...prev, resolution: { verdict, note, at: now() } };
+      if (prev.claim_id === undefined) throw new Error("JOURNAL_NOT_RECONCILABLE:no claim");
+      const next: PaymentJournalRecord = { ...prev, resolution: { verdict: "SETTLED", amount: evidence.amount, evidence, note, at: now() } };
       replaceDurable(intentPath(dir, intentHash), JSON.stringify(next));
-      audit({ event: "RESOLVED", intent_hash: intentHash, verdict, note });
+      audit({ event: "RESOLVED", intent_hash: intentHash, verdict: "SETTLED", amount: evidence.amount, reference: evidence.reference, note });
       return next;
     },
     ack(authId, outcome) {

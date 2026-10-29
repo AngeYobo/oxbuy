@@ -29,7 +29,13 @@ export function assertRequiredAllowlists(state: unknown): void {
   }
 }
 
-export type VersionedPolicyState = { readonly state: State; readonly version: number; readonly reservations: Reservations };
+export type VersionedPolicyState = {
+  readonly state: State;
+  readonly version: number;
+  readonly reservations: Reservations;
+  /** Legacy restore (Phase 2D): no authorization is issued before this time (unix seconds). */
+  readonly quarantine_until?: number;
+};
 
 export interface PolicyStateStore {
   load(): Promise<VersionedPolicyState>;

@@ -18,13 +18,15 @@
  *     wrong-key  signed with a fresh key, with a valid peer proof
  *     no-proof   validly signed, proof file name that does not exist
  *     bad-proof  validly signed, proof file whose content is not this request's hash
+ *     claim-valid      (Phase 2D) the JSON is a claim message, signed with the report key, valid peer proof, to /v1/claim
+ *     claim-wrong-key  (Phase 2D) the same, signed with a fresh key
  *
  * Prints one JSON line: {status, body} or {error}.
  */
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { signReport, type OutcomeReport } from "../../src/executor/outcome-report.ts";
+import { signClaim, signReport, type ClaimMessage, type OutcomeReport } from "../../src/executor/outcome-report.ts";
 import { postJson } from "../../src/isolation/ipc.ts";
 import { settlePost } from "../../src/isolation/settle-channel.ts";
 
@@ -39,7 +41,10 @@ try {
   const report = { executor_kid: reportKey.kid, ...(JSON.parse(reportJson!) as Partial<OutcomeReport>) } as OutcomeReport;
   const otherKey = generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "pem" }).toString();
   const signed = signReport(report, mode === "wrong-key" ? otherKey : reportKey.privateKeyPem);
-  if (mode === "valid" || mode === "wrong-key") {
+  if (mode === "claim-valid" || mode === "claim-wrong-key") {
+    const claim = { executor_kid: reportKey.kid, ...(JSON.parse(reportJson!) as Partial<ClaimMessage>) } as ClaimMessage;
+    out = await settlePost(settleSocketPath, proofDir, "/v1/claim", { claim: signClaim(claim, mode === "claim-wrong-key" ? otherKey : reportKey.privateKeyPem) });
+  } else if (mode === "valid" || mode === "wrong-key") {
     out = await settlePost(settleSocketPath, proofDir, "/v1/settle", { report: signed });
   } else if (mode === "no-proof") {
     out = await postJson(settleSocketPath, "/v1/settle", { body: { report: signed }, proof: randomBytes(16).toString("hex") });

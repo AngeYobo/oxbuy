@@ -22,9 +22,20 @@ import {
 import type { IntentRef, PurchaseRequest } from "../agent/purchase-request.ts";
 import { buildPaymentIntent, validatePurchaseRequest } from "./intent.ts";
 import { sameDomain, type ExecutionDomain } from "../executor/execution-domain.ts";
-import { verifyReport } from "../executor/outcome-report.ts";
+import type { ClaimResult, VoidResult } from "../executor/execution-authority.ts";
+import { verifyClaim, verifyReport, verifyVoid } from "../executor/outcome-report.ts";
 import { assertRequiredAllowlists, type PolicyStateStore } from "./policy-state.ts";
-import { applyOutcome, newReservation, ReportRejected, type ReservationRecord } from "./reservations.ts";
+import {
+  applyClaim,
+  applyOutcome,
+  applyVoid,
+  ClaimRefused,
+  newReservation,
+  releaseIfExpired,
+  ReportRejected,
+  type ApplyResult,
+  type ReservationRecord,
+} from "./reservations.ts";
 
 export type AuthorizationDecision =
   | { readonly decision: "ALLOW"; readonly authorization: AuthorizationV1; readonly intent_ref: IntentRef }
@@ -49,19 +60,22 @@ export type AuthorizationServiceOptions = {
    * generated (in-process harness).
    */
   readonly signingKey?: { readonly privateKeyPem: string; readonly kid: string };
-  /** Executor outcome-report key (Phase 2C). Without it, `settle` refuses every report. */
+  /** Executor message key (Phase 2C reports; Phase 2D claims and voids). Without it, every claim, void, and report is refused. */
   readonly executorReportKey?: { readonly publicKeyPem: string; readonly kid: string };
   /**
    * The execution domain this deployment's executor runs in (Phase 2C; CX2).
    * Every reservation is bound to it; `audience` must already name it
    * (src/executor/execution-domain.ts). Without it, reservations are unbound
-   * and never released (in-process harness).
+   * and only unbound claims, voids, and reports are accepted (in-process
+   * harness only; the auth service process always configures a domain).
    */
   readonly executionDomain?: ExecutionDomain;
+  /** A claim needs `now < expiry - minRemainingSeconds` on this service's clock (Phase 2D; D4). Default 0. */
+  readonly minRemainingSeconds?: number;
 };
 
 export type SettleResult =
-  | { readonly status: "APPLIED" | "ALREADY_APPLIED" | "STALE"; readonly reservation: ReservationRecord; readonly released: string }
+  | { readonly status: "APPLIED" | "ALREADY_APPLIED" | "STALE" | "NOT_CLAIMED"; readonly reservation: ReservationRecord; readonly released: string }
   | { readonly status: "REJECTED"; readonly reason: string };
 
 export function createAuthorizationService(options: AuthorizationServiceOptions) {
@@ -119,6 +133,11 @@ export function createAuthorizationService(options: AuthorizationServiceOptions)
     }
 
     const evaluationTime = options.now();
+    // Legacy restore (Phase 2D): windowed limits restored from a backup are not trusted until every
+    // window and lease that existed before the restore has run out.
+    if (loaded.quarantine_until !== undefined && evaluationTime < loaded.quarantine_until) {
+      return { decision: "DENY", reasons: ["POLICY_STATE_QUARANTINED"] };
+    }
     const intent_ref: IntentRef = {
       intent_id: `intent-${randomBytes(12).toString("hex")}`,
       agent_id: options.agentId,
@@ -160,74 +179,153 @@ export function createAuthorizationService(options: AuthorizationServiceOptions)
   }
 
   /**
-   * Apply one executor outcome report (Phase 2C; F3). The report must carry a
-   * valid executor signature; the transition must be allowed by the
-   * reservation state machine. A release subtracts the released amount from
-   * the agent's budget charge in the same atomic write. Never throws.
+   * The execution domain check for a claim, void, or report naming
+   * `journalId` (CX2): only the reservation's own domain, and only while that
+   * is the domain this service trusts. Without a configured domain (in-process
+   * harness) only unbound reservations are accepted.
    */
-  async function settle(signed: unknown): Promise<SettleResult> {
-    if (!options.executorReportKey) return { status: "REJECTED", reason: "REPORT_INVALID:no trusted executor key" };
-    let facts;
-    try {
-      facts = verifyReport(signed, options.executorReportKey);
-    } catch (err) {
-      return { status: "REJECTED", reason: (err as Error).message };
-    }
+  function domainRefusal(journalId: string, rec: ReservationRecord): string | null {
+    if (!options.executionDomain) return rec.domain === null ? null : "DOMAIN_MISMATCH";
+    if (journalId !== options.executionDomain.journal_id) return "DOMAIN_NOT_CURRENT";
+    if (!sameDomain(rec.domain, options.executionDomain)) return "DOMAIN_MISMATCH";
+    return null;
+  }
+
+  /**
+   * One reservation transition, committed atomically with its budget effect
+   * (compare-and-set, retried on a concurrent commit). `step` throws to refuse;
+   * nothing is written then. A release subtracts exactly what the reservation
+   * stops being charged.
+   */
+  async function transition(
+    authId: string,
+    journalId: string,
+    step: (rec: ReservationRecord, now: number) => ApplyResult,
+  ): Promise<{ ok: true; result: ApplyResult } | { ok: false; reason: string }> {
     for (let attempt = 0; attempt < 5; attempt++) {
       let loaded;
       try {
         loaded = await options.stateStore.load();
       } catch (err) {
-        return { status: "REJECTED", reason: `POLICY_STATE_UNAVAILABLE:${(err as Error).message}` };
+        return { ok: false, reason: `POLICY_STATE_UNAVAILABLE:${(err as Error).message}` };
       }
-      const rec = loaded.reservations[facts.auth_id];
-      if (rec === undefined) return { status: "REJECTED", reason: "REPORT_REJECTED:UNKNOWN_RESERVATION" };
-      // CX2: only the reservation's own execution domain may move it, and only
-      // while that domain is the one this service currently trusts.
-      const reporting: ExecutionDomain | undefined = options.executionDomain && { journal_id: facts.journal_id, executor_uid: options.executionDomain.executor_uid };
-      if (!sameDomain(reporting, options.executionDomain)) return { status: "REJECTED", reason: "REPORT_REJECTED:DOMAIN_NOT_CURRENT" };
-      if (!sameDomain(rec.domain, options.executionDomain)) return { status: "REJECTED", reason: "REPORT_REJECTED:DOMAIN_MISMATCH" };
-      let applied;
+      const rec = loaded.reservations[authId];
+      if (rec === undefined) return { ok: false, reason: "REPORT_REJECTED:UNKNOWN_RESERVATION" };
+      const refusal = domainRefusal(journalId, rec);
+      if (refusal) return { ok: false, reason: `REPORT_REJECTED:${refusal}` };
+      let result: ApplyResult;
       try {
-        applied = applyOutcome(rec, facts, options.now());
+        result = step(rec, options.now());
       } catch (err) {
-        return { status: "REJECTED", reason: err instanceof ReportRejected ? err.message : `REPORT_REJECTED:${(err as Error).message}` };
+        return { ok: false, reason: err instanceof ReportRejected || err instanceof ClaimRefused ? err.message : `REPORT_REJECTED:${(err as Error).message}` };
       }
-      if (applied.kind !== "APPLIED") return { status: applied.kind, reservation: rec, released: "0" };
+      if (!result.changed) return { ok: true, result };
       const spent = loaded.state.budget.spent_in_period[rec.agent_id] ?? 0n;
-      if (applied.release > spent) return { status: "REJECTED", reason: "RESERVATION_ACCOUNTING_INCONSISTENT" };
+      if (result.release > spent || result.release < 0n) return { ok: false, reason: "RESERVATION_ACCOUNTING_INCONSISTENT" };
       const nextState = {
         ...loaded.state,
-        budget: { ...loaded.state.budget, spent_in_period: { ...loaded.state.budget.spent_in_period, [rec.agent_id]: spent - applied.release } },
+        budget: { ...loaded.state.budget, spent_in_period: { ...loaded.state.budget.spent_in_period, [rec.agent_id]: spent - result.release } },
       };
       let committed: boolean;
       try {
-        committed = await options.stateStore.commit(nextState, loaded.version, { ...loaded.reservations, [facts.auth_id]: applied.next });
+        committed = await options.stateStore.commit(nextState, loaded.version, { ...loaded.reservations, [authId]: result.next });
       } catch (err) {
-        return { status: "REJECTED", reason: `POLICY_STATE_UNAVAILABLE:${(err as Error).message}` };
+        return { ok: false, reason: `POLICY_STATE_UNAVAILABLE:${(err as Error).message}` };
       }
-      if (committed) return { status: "APPLIED", reservation: applied.next, released: applied.release.toString() };
+      // Only after the commit (DONE durable) is anything acknowledged.
+      if (committed) return { ok: true, result };
     }
-    return { status: "REJECTED", reason: "POLICY_STATE_CONFLICT" };
+    return { ok: false, reason: "POLICY_STATE_CONFLICT" };
+  }
+
+  function executorKey() {
+    if (!options.executorReportKey) throw new Error("REPORT_INVALID:no trusted executor key");
+    return options.executorReportKey;
   }
 
   /**
-   * RESERVED reservations of the current execution domain whose authorization
-   * expired more than `graceSeconds` ago (cancellation candidates). Other
-   * domains' reservations are never offered (CX2).
+   * Execution claim (Phase 2D): RESERVED -> EXECUTING(claim_id), durably
+   * committed before it is acknowledged, only while the authorization is valid
+   * on this service's clock (`now < expiry - minRemainingSeconds`). At most
+   * one claim per authorization is ever granted. Never throws.
    */
-  async function expiredReservations(graceSeconds: number): Promise<Array<Pick<ReservationRecord, "auth_id" | "intent_hash" | "expiry">>> {
-    const loaded = await options.stateStore.load();
-    const cutoff = options.now() - graceSeconds;
-    return Object.values(loaded.reservations)
-      .filter((r) => r.state === "RESERVED" && r.expiry < cutoff && sameDomain(r.domain, options.executionDomain))
-      .map((r) => ({ auth_id: r.auth_id, intent_hash: r.intent_hash, expiry: r.expiry }));
+  async function claim(signed: unknown): Promise<ClaimResult> {
+    let c;
+    try {
+      c = verifyClaim(signed, executorKey());
+    } catch (err) {
+      return { status: "REJECTED", reason: (err as Error).message };
+    }
+    const t = await transition(c.auth_id, c.journal_id, (rec, now) => applyClaim(rec, c, now, options.minRemainingSeconds ?? 0));
+    if (!t.ok) return { status: "REJECTED", reason: t.reason };
+    return { status: "CLAIMED", auth_id: c.auth_id, intent_hash: c.intent_hash, claim_id: c.claim_id };
+  }
+
+  /** Synchronous VOID of a pre-execution rejection or an abandoned claim (Phase 2D). Never throws. */
+  async function voidAuthorization(signed: unknown): Promise<VoidResult> {
+    let v;
+    try {
+      v = verifyVoid(signed, executorKey());
+    } catch (err) {
+      return { status: "REJECTED", reason: (err as Error).message };
+    }
+    const t = await transition(v.auth_id, v.journal_id, (rec, now) => applyVoid(rec, v, now));
+    if (!t.ok) return { status: "REJECTED", reason: t.reason };
+    return { status: t.result.kind === "ALREADY_APPLIED" ? "ALREADY_APPLIED" : "APPLIED", released: t.result.release.toString() };
+  }
+
+  /**
+   * Apply one executor outcome report for a claim (Phase 2C; F3, Phase 2D).
+   * The report must carry a valid executor signature; the transition must be
+   * allowed by the reservation state machine. Never throws.
+   */
+  async function settle(signed: unknown): Promise<SettleResult> {
+    let facts;
+    try {
+      facts = verifyReport(signed, executorKey());
+    } catch (err) {
+      return { status: "REJECTED", reason: (err as Error).message };
+    }
+    const t = await transition(facts.auth_id, facts.journal_id, (rec, now) => applyOutcome(rec, facts, now));
+    if (!t.ok) return { status: "REJECTED", reason: t.reason };
+    const kind = t.result.kind === "CLAIMED" ? "APPLIED" : t.result.kind;
+    return { status: kind, reservation: t.result.next, released: t.result.release.toString() };
+  }
+
+  /**
+   * Release every unclaimed Phase 2D reservation whose authorization has
+   * expired on this service's clock (no claim can be granted for it any more),
+   * in one commit. Returns how many were released.
+   */
+  async function releaseExpired(): Promise<number> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const loaded = await options.stateStore.load();
+      const now = options.now();
+      const next: Record<string, ReservationRecord> = { ...loaded.reservations };
+      const spent = { ...loaded.state.budget.spent_in_period };
+      let count = 0;
+      for (const rec of Object.values(loaded.reservations)) {
+        const r = releaseIfExpired(rec, now);
+        if (r === null) continue;
+        const s = spent[rec.agent_id] ?? 0n;
+        if (r.release > s) throw new Error("RESERVATION_ACCOUNTING_INCONSISTENT");
+        spent[rec.agent_id] = s - r.release;
+        next[rec.auth_id] = r.next;
+        count += 1;
+      }
+      if (count === 0) return 0;
+      const nextState = { ...loaded.state, budget: { ...loaded.state.budget, spent_in_period: spent } };
+      if (await options.stateStore.commit(nextState, loaded.version, next)) return count;
+    }
+    throw new Error("POLICY_STATE_CONFLICT");
   }
 
   return {
     authorize,
+    claim,
+    voidAuthorization,
     settle,
-    expiredReservations,
+    releaseExpired,
     /** Public verification material for the gateway. Contains no secrets. */
     trustMaterial: Object.freeze({ keySet, authority, audience: options.audience }),
   };

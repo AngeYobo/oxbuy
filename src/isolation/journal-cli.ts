@@ -8,16 +8,24 @@
  *   node journal-cli.ts <journalDir> list
  *   node journal-cli.ts <journalDir> pending
  *   node journal-cli.ts <journalDir> show <intent_hash>
- *   node journal-cli.ts <journalDir> resolve <intent_hash> SETTLED|NOT_SETTLED <note>
+ *   node journal-cli.ts <journalDir> resolve <intent_hash> SETTLED <note>
  *
  * `list`, `pending`, and `show` are read-only and lock-free. `resolve` takes
  * the journal's single-writer lock, so the executor must be stopped first. It
- * attaches the operator's verdict to a STARTED or UNKNOWN record; it never
- * changes the state, and the intent can never be paid again. After a restart
- * the executor reports the resolution to the auth service (RESOLVED_SETTLED
- * or RESOLVED_NOT_SETTLED), which only then confirms or releases the
- * reservation.
+ * attaches a settlement resolution to a STARTED or UNKNOWN record only with
+ * verified evidence (Phase 2D, D5): exactly one ledger entry for the intent
+ * whose MAC under the persistent mock wallet key binds this intent, this
+ * record's claim, and this journal (src/adapters/mock-buy/mock-settlement.ts).
+ * It never changes the state, and the intent can never be paid again. After a
+ * restart the executor reports RESOLVED_SETTLED with the evidenced amount, and
+ * the auth service confirms the claim.
+ *
+ * There is no NOT_SETTLED resolution: a missing ledger entry is not proof
+ * that nothing was paid, and the mock has no positive evidence of
+ * non-execution. Such a reservation stays UNCERTAIN and charged.
  */
+import { dirname, join, resolve as resolvePath } from "node:path";
+import { verifySettlementEvidence } from "../adapters/mock-buy/mock-settlement.ts";
 import { initFilePaymentJournal, openFilePaymentJournal, readFilePaymentJournal } from "../executor/payment-journal.ts";
 
 const [dir, command, intentHash, verdict, ...note] = process.argv.slice(2);
@@ -44,11 +52,20 @@ switch (command) {
     out = reader.inspect(intentHash ?? "") ?? null;
     break;
   case "resolve": {
-    if (verdict !== "SETTLED" && verdict !== "NOT_SETTLED") throw new Error("verdict must be SETTLED or NOT_SETTLED");
+    if (verdict === "NOT_SETTLED") throw new Error("RESOLUTION_REFUSED:no positive evidence of non-execution exists; the reservation stays charged");
+    if (verdict !== "SETTLED") throw new Error("verdict must be SETTLED");
     if (note.length === 0) throw new Error("a reconciliation note is required");
     const journal = openFilePaymentJournal(dir);
     try {
-      out = journal.resolve(intentHash ?? "", verdict, note.join(" "));
+      const record = journal.inspect(intentHash ?? "");
+      if (!record || record.claim_id === undefined) throw new Error("JOURNAL_NOT_RECONCILABLE:no claimed intent");
+      const root = dirname(resolvePath(dir));
+      const evidence = verifySettlementEvidence(
+        // Same layout as src/isolation/executor-state-admin.ts (<root>/journal, <root>/mock-wallet.key, <root>/ledger.jsonl).
+        { walletKeyPath: join(root, "mock-wallet.key"), ledgerPath: join(root, "ledger.jsonl") },
+        { intent_hash: record.intent_hash, claim_id: record.claim_id, journal_id: journal.journalId, request: record.request },
+      );
+      out = journal.resolve(record.intent_hash, evidence, note.join(" "));
     } finally {
       journal.close();
     }

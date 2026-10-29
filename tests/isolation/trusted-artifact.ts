@@ -8,9 +8,9 @@
  * on the working tree are run against disposable copies, never the repo.
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync } from "node:fs";
+import { chmodSync, lstatSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { approveArtifact, removeTree, sealArtifact } from "../../src/isolation/artifact.ts";
 import type { LaunchOptions } from "../../src/isolation/launcher.ts";
@@ -40,10 +40,59 @@ export function freshPolicyState(opts: { budget?: string; ttlSeconds?: number } 
   return root;
 }
 
+/**
+ * Fail-closed guard for every recursive test cleanup (Phase 2D, after the
+ * 2026-10-28 /tmp incident: evidence/phase-2d/INCIDENT-TMP.md). Returns the
+ * canonical path, or throws UNSAFE_CLEANUP_TARGET without touching anything,
+ * unless `dir` is a test-owned temporary directory:
+ *   - an absolute, normalized path (no `..`, `//`, or trailing `/`);
+ *   - a DIRECT child of the canonical temp directory (realpath of
+ *     os.tmpdir()), and its parent resolves there (no symlinked parent);
+ *   - not itself a symlink (lstat); if it exists, a directory;
+ *   - its name is an `oxdeai-` mkdtemp name (prefix + 6 random characters).
+ * So `/`, `/tmp`, `/workspaces`, the repository, any ancestor of a test
+ * directory, other users' or tools' temp entries, and symlink escapes are
+ * all refused.
+ */
+export function assertDisposableTestDir(dir: string): string {
+  const fail = (why: string): never => {
+    throw new Error(`UNSAFE_CLEANUP_TARGET:${String(dir)}: ${why}`);
+  };
+  if (typeof dir !== "string" || !isAbsolute(dir)) return fail("not an absolute path");
+  if (resolve(dir) !== dir) fail("not normalized (.., //, or trailing /)");
+  const tmpRoot = realpathSync(tmpdir());
+  if (dirname(dir) !== tmpRoot) fail(`not a direct child of ${tmpRoot}`);
+  let parentReal: string;
+  try {
+    parentReal = realpathSync(dirname(dir));
+  } catch {
+    return fail("parent does not resolve");
+  }
+  if (parentReal !== tmpRoot) fail("parent resolves elsewhere (symlink)");
+  if (!/^oxdeai-[A-Za-z0-9-]*[A-Za-z0-9]-[A-Za-z0-9]{6}$/.test(basename(dir))) fail("not an oxdeai- mkdtemp name");
+  if (dir === "/" || dir === tmpRoot || dir === "/workspaces" || dir === REPO_ROOT || REPO_ROOT.startsWith(`${dir}/`)) fail("forbidden root");
+  let st;
+  try {
+    st = lstatSync(dir);
+  } catch {
+    return dir; // does not exist: nothing to remove
+  }
+  if (st.isSymbolicLink()) fail("is a symlink");
+  if (!st.isDirectory()) fail("not a directory");
+  return dir;
+}
+
 /** Remove a fixture parent (state root, anchor root, or executor state root). Anchor files are append-only: clear the attribute first. */
 export function removeStateRoot(root: string): void {
-  spawnSync("sudo", ["-n", "chattr", "-R", "-a", dirname(root)], { stdio: "ignore" });
-  spawnSync("sudo", ["-n", "rm", "-rf", "--", dirname(root)]);
+  // `root` is <mkdtemp parent>/<name>; only that mkdtemp parent is removed, and only if it is test-owned.
+  const parent = assertDisposableTestDir(dirname(root));
+  spawnSync("sudo", ["-n", "chattr", "-R", "-a", parent], { stdio: "ignore" });
+  spawnSync("sudo", ["-n", "rm", "-rf", "--", parent]);
+}
+
+/** Recursive removal of a test-owned temporary directory (guarded; see assertDisposableTestDir). */
+export function removeTestDir(dir: string): void {
+  removeTree(assertDisposableTestDir(dir));
 }
 
 /** A fresh persistent executor state root with an initialized, empty journal (Phase 2C; N2). Removed by `removeStateRoot`. */
@@ -91,7 +140,7 @@ export async function trustedArtifact(sourceRoot: string = REPO_ROOT) {
       return launcher.launchIsolatedSystem({ agentCwd: REPO_ROOT, ...opts, policyStateRoot, executorStateRoot });
     },
     cleanup: () => {
-      removeTree(store);
+      removeTestDir(store);
       for (const r of stateRoots.splice(0)) removeStateRoot(r);
     },
   };

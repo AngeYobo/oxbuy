@@ -14,6 +14,7 @@ import { createMockBuyAdapter } from "../../src/adapters/mock-buy/mock-buy.ts";
 import { createAuthorizationService } from "../../src/authorization/authorization-service.ts";
 import { createInMemoryPolicyStateStore } from "../../src/authorization/policy-state.ts";
 import { domainAudience, domainId } from "../../src/executor/execution-domain.ts";
+import { createLocalExecutionAuthority } from "../../src/executor/execution-authority.ts";
 import { createPaymentExecutor } from "../../src/executor/executor.ts";
 import { createInMemoryPaymentJournal } from "../../src/executor/payment-journal.ts";
 import { AGENT_ID, GATEWAY_AUDIENCE, initialPolicyState, PDP_ISSUER, POLICY_VERSION, SERVICES } from "../../src/system.ts";
@@ -24,6 +25,9 @@ const D2 = { journal_id: "2".repeat(32), executor_uid: 994 };
 const TOKEN = "t".repeat(64);
 const now = () => Math.floor(Date.now() / 1000);
 const pem = generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+const report = generateKeyPairSync("ed25519");
+const reportKey = { privateKeyPem: report.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), kid: "exec-1" };
+const reportPub = { publicKeyPem: report.publicKey.export({ type: "spki", format: "pem" }).toString(), kid: "exec-1" };
 
 function pdp(domain: typeof D1) {
   return createAuthorizationService({
@@ -35,11 +39,13 @@ function pdp(domain: typeof D1) {
     stateStore: createInMemoryPolicyStateStore(initialPolicyState()),
     now,
     signingKey: { privateKeyPem: pem, kid: "pdp-shared" },
+    executorReportKey: reportPub,
     executionDomain: domain,
   });
 }
 
-function executor(domain: typeof D1, trust: ReturnType<typeof pdp>["trustMaterial"]) {
+function executor(domain: typeof D1, auth: ReturnType<typeof pdp>) {
+  const trust = auth.trustMaterial;
   const mock = createMockBuyAdapter(Object.values(SERVICES));
   const journal = createInMemoryPaymentJournal(now);
   const ex = createPaymentExecutor({
@@ -47,6 +53,8 @@ function executor(domain: typeof D1, trust: ReturnType<typeof pdp>["trustMateria
     adapter: mock.adapter,
     verification: { expectedAudience: domainAudience(GATEWAY_AUDIENCE, domain), trustedKeySets: [trust.keySet], trustedAuthorizationAuthorities: [trust.authority], now },
     journal,
+    // The executor of `domain` claims at the authorization service with its own journal id.
+    authority: createLocalExecutionAuthority(auth, reportKey, domain.journal_id),
   });
   return { ex, mock, journal };
 }
@@ -68,14 +76,14 @@ test("CX2e same signing key, other domain: refused before payment, not consumed;
   const body = { action: { request, intent_ref: d.intent_ref }, authorization: d.authorization };
   const headers = { [INTERNAL_EXECUTOR_TOKEN_HEADER]: TOKEN };
 
-  const foreign = executor(D2, auth.trustMaterial);
+  const foreign = executor(D2, auth);
   const r2 = await foreign.ex.handle(body, headers);
   assert.equal(r2.status, 409);
   assert.match((r2.body as { error: string }).error, /EXECUTOR_AUTHORIZATION_INVALID:.*AUTH_AUDIENCE_MISMATCH/);
   assert.equal(foreign.mock.inspect.counters.payments, 0);
   assert.deepEqual(foreign.journal.list(), [], "nothing reserved in the foreign domain's journal");
 
-  const own = executor(D1, auth.trustMaterial);
+  const own = executor(D1, auth);
   const r1 = await own.ex.handle(body, headers);
   assert.equal(r1.status, 200, JSON.stringify(r1.body));
   assert.equal(own.mock.inspect.counters.payments, 1);

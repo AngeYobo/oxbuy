@@ -24,10 +24,18 @@
  * resets spending capacity:
  *   init      first time only (POLICY_STATE_EXISTS otherwise)
  *   migrate   format v1 -> v2: verified backup, deterministic and resumable
- *   restore   from a backup that the anchor proves was a real past state;
- *             spending is carried forward from the anchor head and open
- *             reservations are frozen as UNCERTAIN
- *   verify    state.json against the anchor
+ *   rebuild   (Phase 2D; D2) state.json of the anchor head, rebuilt from the
+ *             anchor's authenticated payloads and accepted only if it hashes
+ *             to the head: every field exact (budget, reservations, claims,
+ *             nonces, rate windows, leases, kill switch, quarantine)
+ *   restore   LEGACY ONLY: for an anchor that cannot be rebuilt (Phase 2C
+ *             history without payloads). From a backup that the anchor
+ *             proves was a real past state; spending is carried forward from
+ *             the anchor head, open reservations are frozen as UNCERTAIN
+ *             (never claimable or releasable), and issuance is quarantined
+ *             until every rate window and lease of the backup has run out.
+ *             Refused when `rebuild` is possible.
+ *   verify    state.json against the anchor, with a recovery outcome
  * The operator runs them as itself, using sudo only for single file
  * primitives (install, mv, tee -a, chattr, flock). migrate and restore hold
  * the writer lock for their whole duration, so they refuse while an auth
@@ -39,9 +47,9 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { createAuthorizationService } from "../authorization/authorization-service.ts";
-import { nextEntry, parseAnchor, sha256, spentOf, type AnchorEntry, type AnchorLog } from "../authorization/policy-anchor.ts";
+import { nextEntry, parseAnchor, rebuildMaterial, sha256, spentOf, type AnchorEntry, type AnchorLog } from "../authorization/policy-anchor.ts";
 import { createInMemoryPolicyStateStore } from "../authorization/policy-state.ts";
-import { initialStateFile, parseStateFile, stateFileBytes, type PolicyBinding } from "../authorization/policy-state-file.ts";
+import { anchorPayload, initialStateFile, parseStateFile, rebuildStateBytes, stateFileBytes, type PolicyBinding } from "../authorization/policy-state-file.ts";
 import { freezeForRestore } from "../authorization/reservations.ts";
 import { AGENT_ID, GATEWAY_AUDIENCE, initialPolicyState, PDP_ISSUER, POLICY, POLICY_VERSION } from "../system.ts";
 import { identityOf } from "./identity.ts";
@@ -181,7 +189,7 @@ export function initPolicyState(opts: { stateRoot: string; budget?: string; ttlS
   const bytes = initialStateFile(binding, state);
   // PREPARE first: a crash before state.json exists leaves a refusing, inspectable state
   // (POLICY_STATE_MISSING); a crash before DONE is completed by the auth service at startup.
-  createAnchor(anchorPath, { kind: "PREPARE", op: "INIT", version: 0, state_sha256: sha256(bytes), spent: spentOf(state) }, "POLICY_STATE_INIT_FAILED");
+  createAnchor(anchorPath, { kind: "PREPARE", op: "INIT", version: 0, state_sha256: sha256(bytes), spent: spentOf(state), payload: anchorPayload({ state }, {}, true) }, "POLICY_STATE_INIT_FAILED");
   completePrepared(anchorPath, stateDir, bytes, "POLICY_STATE_INIT_FAILED");
   return { binding, stateDir };
 }
@@ -258,7 +266,15 @@ export async function migratePolicyState(opts: { stateRoot: string; ttlSeconds?:
     }
     const v2 = stateFileBytes({ binding, version: parsedNow.version + 1, state: parsedNow.state, reservations: {} });
     parseStateFile(v2, binding); // the result must be valid v2
-    const genesis = { kind: "PREPARE" as const, op: "MIGRATE" as const, version: parsedNow.version + 1, state_sha256: sha256(v2), spent: spentOf(parsedNow.state), from_sha256: v1Sha };
+    const genesis = {
+      kind: "PREPARE" as const,
+      op: "MIGRATE" as const,
+      version: parsedNow.version + 1,
+      state_sha256: sha256(v2),
+      spent: spentOf(parsedNow.state),
+      from_sha256: v1Sha,
+      payload: anchorPayload({ state: parsedNow.state }, {}, true),
+    };
     if (exists(anchorPath)) {
       // Resume: the anchor must be exactly this migration's open genesis.
       const log = readAnchorAsRoot(anchorPath);
@@ -278,19 +294,77 @@ export async function migratePolicyState(opts: { stateRoot: string; ttlSeconds?:
   });
 }
 
-export type RestoreResult = { stateDir: string; version: number; carried_spent: Record<string, string>; frozen: number; state_sha256: string };
+export type RecoveryOutcome = "SAFE_TO_RESUME" | "RECOVERY_REQUIRED" | "ROLLBACK_DETECTED" | "INTEGRITY_FAILURE";
+
+export type RebuildResult = { outcome: RecoveryOutcome; stateDir: string; version?: number; state_sha256?: string; rebuilt: boolean; reason?: string };
 
 /**
- * Restore state.json from a backup file (operator-readable path).
+ * Rebuild state.json for the anchor head from the anchor alone (Phase 2D;
+ * D2). Auth service stopped (takes the writer lock). Writes nothing unless
+ * the rebuilt bytes hash exactly to the head; never adds an anchor entry
+ * (the rebuilt file IS the head version). Outcomes:
+ *   SAFE_TO_RESUME     state.json is (now) exactly the head
+ *   RECOVERY_REQUIRED  an open PREPARE (start and stop the auth service once), or no payload coverage (legacy history)
+ *   INTEGRITY_FAILURE  the anchor is damaged or its payloads do not reproduce the head
+ */
+export async function rebuildPolicyState(opts: { stateRoot: string; ttlSeconds?: number }): Promise<RebuildResult> {
+  const binding = policyBinding({ ttlSeconds: opts.ttlSeconds });
+  const stateDir = policyStateDir(opts.stateRoot, binding);
+  const anchorPath = anchorPathOf(opts.stateRoot, binding);
+  return withWriterLock(join(stateDir, "writer.lock"), () => {
+    let log: AnchorLog;
+    try {
+      log = readAnchorAsRoot(anchorPath);
+    } catch (err) {
+      return { outcome: "INTEGRITY_FAILURE" as const, stateDir, rebuilt: false, reason: (err as Error).message };
+    }
+    if (log.pending) return { outcome: "RECOVERY_REQUIRED" as const, stateDir, rebuilt: false, reason: "POLICY_ANCHOR_PENDING:start and stop the auth service once" };
+    const m = rebuildMaterial(log);
+    if (!m.covered) return { outcome: "RECOVERY_REQUIRED" as const, stateDir, rebuilt: false, reason: `POLICY_REBUILD_INCOMPLETE:${m.reason}` };
+    let rebuilt: { bytes: string; version: number };
+    try {
+      rebuilt = rebuildStateBytes(log, binding);
+    } catch (err) {
+      return { outcome: "INTEGRITY_FAILURE" as const, stateDir, rebuilt: false, reason: (err as Error).message };
+    }
+    const sha = sha256(rebuilt.bytes);
+    const current = sudo(["cat", join(stateDir, "state.json")]);
+    if (current.status === 0 && sha256(current.stdout) === sha) return { outcome: "SAFE_TO_RESUME" as const, stateDir, version: rebuilt.version, state_sha256: sha, rebuilt: false };
+    replaceState(stateDir, rebuilt.bytes, "POLICY_REBUILD_FAILED");
+    const readBack = must(["cat", join(stateDir, "state.json")], "POLICY_REBUILD_VERIFY_FAILED");
+    if (sha256(readBack) !== sha) throw new Error("POLICY_REBUILD_VERIFY_FAILED:hash");
+    parseStateFile(readBack, binding);
+    return { outcome: "SAFE_TO_RESUME" as const, stateDir, version: rebuilt.version, state_sha256: sha, rebuilt: true };
+  });
+}
+
+export type RestoreResult = { stateDir: string; version: number; carried_spent: Record<string, string>; frozen: number; state_sha256: string; quarantine_until: number };
+
+/**
+ * LEGACY restore of state.json from a backup file (operator-readable path),
+ * for an anchor whose history cannot be rebuilt (Phase 2C, before its first
+ * Phase 2D commit). Refused (POLICY_RESTORE_SUPERSEDED) when `rebuild` can
+ * reproduce the head exactly.
  *   - The backup must be valid v2 state for this binding, and its exact hash
  *     must appear in the anchor as a state that really existed (not aborted).
  *     Anything else is refused: POLICY_RESTORE_UNVERIFIED.
  *   - Spending is carried forward: for each agent, max(backup, anchor head).
  *     A restore can never give back consumed capacity.
- *   - Reservations open in the backup are frozen as UNCERTAIN: they can only
- *     be closed by an operator-reconciled report, never released twice.
- *   - The result is a new version (head + 1), anchored as RESTORE before it
- *     is written; then read back and verified.
+ *   - Reservations open in the backup are frozen as UNCERTAIN: never
+ *     claimable, voidable, expirable, or releasable; a confirmation keeps the
+ *     full charge (src/authorization/reservations.ts). Reservations created
+ *     after the backup are absent: they can never be claimed (their charge is
+ *     part of the carried-forward spending).
+ *   - Policy configuration must equal this deployment's (no relaxation by restore).
+ *   - Issuance is quarantined (POLICY_STATE_QUARANTINED) until max(ttl,
+ *     velocity window, tool window) after the restore: every rate window and
+ *     concurrency lease that existed before the restore has run out by then.
+ *     Replay nonces are server-generated and restored from the backup.
+ *     The kill switch cannot be verified against a legacy anchor (no payload):
+ *     the backup's value is kept; documented limitation.
+ *   - The result is a new version (head + 1), anchored as RESTORE (with a
+ *     full payload, so `rebuild` works from then on) before it is written;
+ *     then read back and verified.
  */
 export async function restorePolicyState(opts: { stateRoot: string; backupPath: string; ttlSeconds?: number; at?: number }): Promise<RestoreResult> {
   const binding = policyBinding({ ttlSeconds: opts.ttlSeconds });
@@ -300,11 +374,27 @@ export async function restorePolicyState(opts: { stateRoot: string; backupPath: 
   return withWriterLock(join(stateDir, "writer.lock"), () => {
     const backup = parseStateFile(backupRaw, binding);
     const log = readAnchorAsRoot(anchorPath);
+    if (rebuildMaterial(log).covered) throw new Error("POLICY_RESTORE_SUPERSEDED:the anchor can rebuild the exact head; use policy-cli rebuild");
     const backupSha = sha256(backupRaw);
     // Only a state that was durably completed (DONE) is a genuine past state.
     const genuine = log.completed.some((c) => c.state_sha256 === backupSha && c.version === backup.version);
     if (!genuine) throw new Error("POLICY_RESTORE_UNVERIFIED:the backup is not a completed state recorded in the anchor");
     if (log.pending) throw new Error("POLICY_RESTORE_REFUSED:the anchor has an open PREPARE; start and stop the auth service once to resolve it");
+    // No relaxation of policy configuration through a restore.
+    const config = (st: typeof backup.state) =>
+      encodePolicyConfig({
+        allowlists: st.allowlists,
+        budget_limit: st.budget.budget_limit,
+        max_amount_per_action: st.max_amount_per_action,
+        velocity: st.velocity.config,
+        replay: { window_seconds: st.replay.window_seconds, max_nonces_per_agent: st.replay.max_nonces_per_agent },
+        recursion: st.recursion,
+        concurrency: st.concurrency.max_concurrent,
+        tool_limits: { window_seconds: st.tool_limits?.window_seconds, max_calls: st.tool_limits?.max_calls },
+      });
+    const deployed = initialPolicyState();
+    deployed.budget.budget_limit = backup.state.budget.budget_limit; // set per state root at init (policy-cli init <budget>)
+    if (config(backup.state) !== config(deployed)) throw new Error("POLICY_RESTORE_REFUSED:the backup's policy configuration differs from this deployment's");
     const head = log.head!;
     const spent: Record<string, bigint> = {};
     const carried: Record<string, string> = {};
@@ -315,25 +405,30 @@ export async function restorePolicyState(opts: { stateRoot: string; backupPath: 
       carried[agent] = spent[agent]!.toString();
     }
     const at = opts.at ?? Math.floor(Date.now() / 1000);
+    const ttl = opts.ttlSeconds ?? POLICY.ttlSeconds;
+    const quarantine_until = at + Math.max(ttl, backup.state.velocity.config.window_seconds, backup.state.tool_limits?.window_seconds ?? 0);
     const reservations = freezeForRestore(backup.reservations, at);
     const frozen = Object.values(reservations).filter((r) => r.history.some((h) => h.reason === "RESTORED_FROM_BACKUP")).length;
-    const restored = stateFileBytes({
-      binding,
-      version: head.version + 1,
-      state: { ...backup.state, budget: { ...backup.state.budget, spent_in_period: spent } },
-      reservations,
-    });
+    const state = { ...backup.state, budget: { ...backup.state.budget, spent_in_period: spent } };
+    const restored = stateFileBytes({ binding, version: head.version + 1, state, reservations, quarantine_until });
     const sha = sha256(restored);
-    appendAnchorAsRoot(anchorPath, log, { kind: "PREPARE", op: "RESTORE", version: head.version + 1, state_sha256: sha, spent: carried, from_sha256: backupSha }, "POLICY_RESTORE_FAILED");
+    appendAnchorAsRoot(
+      anchorPath,
+      log,
+      { kind: "PREPARE", op: "RESTORE", version: head.version + 1, state_sha256: sha, spent: carried, from_sha256: backupSha, payload: anchorPayload({ state, quarantine_until }, reservations, true) },
+      "POLICY_RESTORE_FAILED",
+    );
     completePrepared(anchorPath, stateDir, restored, "POLICY_RESTORE_FAILED");
     const readBack = must(["cat", join(stateDir, "state.json")], "POLICY_RESTORE_VERIFY_FAILED");
     if (sha256(readBack) !== sha) throw new Error("POLICY_RESTORE_VERIFY_FAILED:hash");
     parseStateFile(readBack, binding);
-    return { stateDir, version: head.version + 1, carried_spent: carried, frozen, state_sha256: sha };
+    return { stateDir, version: head.version + 1, carried_spent: carried, frozen, state_sha256: sha, quarantine_until };
   });
 }
 
-/** Check state.json against the anchor (read-only). */
+const encodePolicyConfig = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? `${x}n` : x));
+
+/** Check state.json against the anchor (read-only), with a recovery outcome. */
 export function verifyPolicyState(opts: { stateRoot: string; ttlSeconds?: number }) {
   const binding = policyBinding({ ttlSeconds: opts.ttlSeconds });
   const stateDir = policyStateDir(opts.stateRoot, binding);
@@ -343,15 +438,30 @@ export function verifyPolicyState(opts: { stateRoot: string; ttlSeconds?: number
   const log = readAnchorAsRoot(anchorPath);
   const appendOnly = (sudo(["lsattr", "-d", anchorPath]).stdout.split(/\s+/)[0] ?? "").includes("a");
   const head = log.head!;
+  const matches = head.version === f.version && head.state_sha256 === sha256(raw);
+  const older = !matches && log.completed.some((c) => c.state_sha256 === sha256(raw) && c.version < head.version);
+  const cover = rebuildMaterial(log);
+  const outcome: RecoveryOutcome = !appendOnly
+    ? "INTEGRITY_FAILURE"
+    : matches && !log.pending
+      ? "SAFE_TO_RESUME"
+      : older
+        ? "ROLLBACK_DETECTED"
+        : matches || (log.pending && log.pending.state_sha256 === sha256(raw))
+          ? "RECOVERY_REQUIRED"
+          : "INTEGRITY_FAILURE";
   return {
+    outcome,
     stateDir,
     anchorPath,
     version: f.version,
     state_sha256: sha256(raw),
     anchor_head: { seq: head.seq, version: head.version, state_sha256: head.state_sha256 },
     pending: log.pending ? { seq: log.pending.seq, op: log.pending.op, version: log.pending.version } : null,
-    matches: head.version === f.version && head.state_sha256 === sha256(raw),
+    matches,
     append_only: appendOnly,
+    rebuild: cover.covered ? "AVAILABLE" : `UNAVAILABLE:${cover.reason}`,
+    ...(f.quarantine_until !== undefined ? { quarantine_until: f.quarantine_until } : {}),
     reservations: Object.values(f.reservations).reduce<Record<string, number>>((m, r) => ((m[r.state] = (m[r.state] ?? 0) + 1), m), {}),
   };
 }

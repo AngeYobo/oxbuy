@@ -22,6 +22,8 @@ import { createMockBuyAdapter } from "../adapters/mock-buy/mock-buy.ts";
 import { withMockSettlement } from "../adapters/mock-buy/mock-settlement.ts";
 import { createPaymentExecutor } from "../executor/executor.ts";
 import { domainAudience } from "../executor/execution-domain.ts";
+import { interpretClaim, interpretVoid, type ExecutionAuthority } from "../executor/execution-authority.ts";
+import { CLAIM_TYPE, signClaim, signVoid, VOID_TYPE } from "../executor/outcome-report.ts";
 import { createOutcomeReporter } from "../executor/outcome-reporter.ts";
 import { PaymentRefusedError, type PaymentAdapter } from "../executor/payment-adapter.ts";
 import { openFilePaymentJournal, type FilePaymentJournal } from "../executor/payment-journal.ts";
@@ -32,6 +34,7 @@ import { settlePost } from "./settle-channel.ts";
 function withFaults(inner: PaymentAdapter, faults: ExecutorFaults): PaymentAdapter {
   return {
     async quote(r) {
+      if (faults.delayQuoteMs) await sleep(faults.delayQuoteMs);
       const q = await inner.quote(r);
       return faults.quoteDrift ? { ...q, amount: (BigInt(q.amount) * 10n).toString() } : q;
     },
@@ -74,23 +77,47 @@ try {
   if (config.verification.expectedAudience !== domainAudience(config.domain.baseAudience, d)) refuse(78, "EXECUTION_DOMAIN_MISMATCH:audience");
 }
 const mock = createMockBuyAdapter(config.services.map((s) => ({ ...s, price: BigInt(s.price) })));
-const adapter = withFaults(withMockSettlement(mock.adapter, config), faults);
+const adapter = withFaults(withMockSettlement(mock.adapter, { ...config, journalId: journal.journalId }), faults);
+// The authorization service as execution authority (Phase 2D), over the peer-proofed settle channel.
+// Any transport failure is a non-definitive claim answer: the attempt is abandoned, never paid.
+const authority: ExecutionAuthority = {
+  async claim(c) {
+    const signed = signClaim({ type: CLAIM_TYPE, ...c, journal_id: journal.journalId, executor_kid: config.reportKey.kid }, config.reportKey.privateKeyPem);
+    try {
+      const res = await settlePost(config.settleSocketPath, config.proofDir, "/v1/claim", { claim: signed }, config.claimTimeoutMs);
+      return interpretClaim(c, res.status, res.body);
+    } catch (err) {
+      return { ok: false, definitive: false, reason: `CLAIM_UNAVAILABLE:${(err as NodeJS.ErrnoException).code ?? (err as Error).message}` };
+    }
+  },
+  async void(v) {
+    const signed = signVoid({ type: VOID_TYPE, ...v, journal_id: journal.journalId, executor_kid: config.reportKey.kid }, config.reportKey.privateKeyPem);
+    try {
+      const res = await settlePost(config.settleSocketPath, config.proofDir, "/v1/void", { void: signed }, config.claimTimeoutMs);
+      const answer = interpretVoid(res.status, res.body);
+      emit({ event: "void", auth_id: v.auth_id, reason: v.reason, acknowledged: answer.acknowledged, detail: answer.reason });
+      return answer;
+    } catch (err) {
+      emit({ event: "void", auth_id: v.auth_id, reason: v.reason, acknowledged: false, detail: (err as Error).message });
+      return { acknowledged: false, reason: (err as Error).message };
+    }
+  },
+};
 const executor = createPaymentExecutor({
   internalToken: config.internalToken,
   adapter,
   verification: { ...config.verification, now: () => Math.floor(Date.now() / 1000) },
   journal,
+  authority,
 });
 
 const reporter = createOutcomeReporter({
   journal,
   key: config.reportKey,
   inFlight: executor.inFlight,
-  graceSeconds: config.cancelGraceSeconds,
   faults: { crashBeforeAck: faults.crashBeforeAck },
   transport: {
     settle: (signed) => settlePost(config.settleSocketPath, config.proofDir, "/v1/settle", { report: signed }),
-    expired: (graceSeconds) => settlePost(config.settleSocketPath, config.proofDir, "/v1/settle/expired", { grace_seconds: graceSeconds }),
   },
   log: emit,
 });

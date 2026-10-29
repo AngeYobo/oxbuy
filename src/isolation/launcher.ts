@@ -63,7 +63,7 @@ import { ancestorDirs, assertUntrustedCannotWrite, selfRoot, setReadOnly, treePa
 import type { AuthConfig, AuthFaults, ExecutorConfig, ExecutorFaults, GatewayConfig } from "./config.ts";
 import { commandAs, identitiesUnavailableReason, identityOf, writableBy, type Role } from "./identity.ts";
 import { domainAudience } from "../executor/execution-domain.ts";
-import { executorJournalDir, executorLedgerPath } from "./executor-state-admin.ts";
+import { executorJournalDir, executorLedgerPath, executorWalletKeyPath } from "./executor-state-admin.ts";
 import { anchorPathOf, anchorRootOf, policyBinding, policyStateDir } from "./policy-state-admin.ts";
 
 export { AGENT_GID, AGENT_UID, agentIdentityUnavailableReason } from "./identity.ts";
@@ -98,8 +98,12 @@ export type LaunchOptions = {
   readonly executorStateRoot?: string;
   /** Executor outcome-report pass interval. Default 2000 ms. */
   readonly reconcileIntervalMs?: number;
-  /** Cancel a reservation this long after its authorization expired. Default 5 s. */
-  readonly cancelGraceSeconds?: number;
+  /** Auth service: release expired, unclaimed reservations this often (Phase 2D). Default 1000 ms. */
+  readonly expiryReleaseIntervalMs?: number;
+  /** Auth service: a claim needs `now < expiry - minRemainingSeconds` (Phase 2D; D4). Default 0. */
+  readonly minRemainingSeconds?: number;
+  /** Executor: claim / VOID request timeout (Phase 2D). Default 10000 ms. */
+  readonly claimTimeoutMs?: number;
   /** Directory in which the runtime root is created. Default: os.tmpdir(). */
   readonly runtimeParent?: string;
   /** Working directory for programs run as a domain identity (must be readable by it). Default: process.cwd(). */
@@ -245,7 +249,8 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     executorConfig: "",
     /** Persistent journal and ledger (outside `root`). */
     journalDir: executorJournalDir(executorStateRoot),
-    walletKeyPath: "",
+    /** Persistent mock wallet key (Phase 2D; created by executor-cli init). */
+    walletKeyPath: executorWalletKeyPath(executorStateRoot),
     ledgerPath: executorLedgerPath(executorStateRoot),
   };
   paths.publicSocket = join(paths.publicDir, "gateway.sock");
@@ -255,7 +260,6 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
   paths.authConfig = join(paths.authDir, "config.json");
   paths.executorConfig = join(paths.executorDir, "config.json");
   paths.settleSocket = join(paths.settleIpcDir, "settle.sock");
-  paths.walletKeyPath = join(paths.executorDir, "mock-wallet.key");
 
   /** Install a 0600 file owned by `role` (via a private operator staging file). */
   function install(role: Role, dest: string, data: string | Buffer): void {
@@ -282,7 +286,7 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     proofDir: paths.proofDir,
     reportKey: { privateKeyPem: reportKey.privateKeyPem, kid: reportKey.kid },
     reconcileIntervalMs: opts.reconcileIntervalMs ?? 2_000,
-    cancelGraceSeconds: opts.cancelGraceSeconds ?? 5,
+    claimTimeoutMs: opts.claimTimeoutMs ?? 10_000,
     domain: { baseAudience: GATEWAY_AUDIENCE, ...executionDomain },
     faults,
   });
@@ -292,6 +296,8 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     lockPath: paths.writerLock,
     anchorPath: paths.anchorPath,
     decisionLogPath: paths.decisionLog,
+    expiryReleaseIntervalMs: opts.expiryReleaseIntervalMs ?? 1_000,
+    minRemainingSeconds: opts.minRemainingSeconds ?? 0,
     settleSocketPath: paths.settleSocket,
     proofDir: paths.proofDir,
     executorUid: identityOf("executor")!.uid,
@@ -324,7 +330,6 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     sudo(["chown", `${identityOf(u)!.uid}:${identityOf(g)!.gid}`, p]);
     sudo(["chmod", mode, p]);
   }
-  install("executor", paths.walletKeyPath, randomBytes(32));
 
   // 5. Trusted processes, each as its own identity.
   const procs: Partial<Record<Service, { child: ChildProcess; pid: number }>> = {};

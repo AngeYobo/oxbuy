@@ -23,6 +23,8 @@ export type ExecutorFaults = {
   readonly crashAfterAuthRecord?: boolean;
   /** The live quote exceeds every authorized amount: an authentic authorization is rejected before execution. */
   readonly quoteDrift?: boolean;
+  /** Hold the live quote this long (the authorization can expire meanwhile; Phase 2D, L-4). */
+  readonly delayQuoteMs?: number;
   /** `pay` refuses before signing (PaymentRefusedError) after the intent is STARTED. */
   readonly refuseBeforeSigning?: boolean;
   /** SIGKILL after the auth service acknowledged an outcome report, before the ack is journaled. */
@@ -53,8 +55,8 @@ export type ExecutorConfig = {
   /** Ed25519 key that signs outcome reports; only the executor can read it. */
   readonly reportKey: { readonly privateKeyPem: string; readonly kid: string };
   readonly reconcileIntervalMs: number;
-  /** Reservations are cancelled this long after their authorization expired. */
-  readonly cancelGraceSeconds: number;
+  /** Timeout of a claim or VOID request to the auth service (Phase 2D). A timeout abandons the attempt. */
+  readonly claimTimeoutMs: number;
   /**
    * Execution domain (Phase 2C; CX2). The executor refuses to start unless its
    * open journal's journal_id, its own uid, and verification.expectedAudience
@@ -97,6 +99,12 @@ export type AuthFaults = {
   readonly failDoneAppend?: boolean;
   /** SIGKILL after an outcome report was committed, before it is acknowledged. */
   readonly crashAfterSettleCommit?: boolean;
+  /** SIGKILL after an execution claim was committed, before it is acknowledged (Phase 2D). */
+  readonly crashAfterClaimCommit?: boolean;
+  /** SIGKILL after a VOID was committed, before it is acknowledged (Phase 2D). */
+  readonly crashAfterVoidCommit?: boolean;
+  /** PREPARE append fails: "full" (written, then EIO), "torn" (partial line, then ENOSPC); "readback": written, re-read fails (Phase 2D, L-1). */
+  readonly failPrepare?: "full" | "torn" | "readback";
 };
 
 /** Authorization service (PDP + signer). Holds no payment credential. */
@@ -121,6 +129,10 @@ export type AuthConfig = {
   readonly executionDomain: { readonly journal_id: string; readonly executor_uid: number };
   /** Append-only decision audit log (kept with the persistent state). */
   readonly decisionLogPath: string;
+  /** How often expired, unclaimed reservations are released (Phase 2D). */
+  readonly expiryReleaseIntervalMs: number;
+  /** A claim needs `now < expiry - minRemainingSeconds` (Phase 2D; D4). */
+  readonly minRemainingSeconds: number;
   readonly pdp: {
     readonly privateKeyPem: string;
     readonly kid: string;

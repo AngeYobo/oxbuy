@@ -10,8 +10,12 @@
  * or delete it without first removing the attribute (CAP_LINUX_IMMUTABLE).
  *
  * Entry kinds:
- *   PREPARE {op, version, state_sha256, spent}   a state version about to be written
+ *   PREPARE {op, version, state_sha256, spent, payload?}   a state version about to be written
  *           op: INIT | MIGRATE | RESTORE (operator) | COMMIT (auth service)
+ *           payload (Phase 2D; D2): the complete core engine state of that version,
+ *           its quarantine marker, and the reservation records it changes (all of them,
+ *           `full`, for INIT / MIGRATE / RESTORE and for the first commit on an anchor
+ *           without coverage). The chain hash authenticates it.
  *   DONE    {version, state_sha256, spent}       that version is durably in place
  *   ABORT   {aborts: seq}                        that PREPARE never took effect
  *           {torn_sha256}                         a torn final line (crash during an append)
@@ -68,8 +72,23 @@ export type AnchorEntry = {
   readonly torn_sha256?: string;
   /** MIGRATE / RESTORE: sha256 of the source file. */
   readonly from_sha256?: string;
+  /** Phase 2D (D2): enough to rebuild this version's state file exactly. */
+  readonly payload?: AnchorPayload;
   readonly prev: string;
   readonly hash: string;
+};
+
+/**
+ * Rebuild material of one version. `state` and `reservations` are JSON values
+ * as written in the state file (bigints as {"$bigint": "<decimal>"}).
+ */
+export type AnchorPayload = {
+  readonly state: unknown;
+  readonly reservations: Readonly<Record<string, unknown>>;
+  /** `reservations` is the complete table (else: only the records this version changed). */
+  readonly full?: true;
+  /** Issuance quarantine of this version (legacy restore), unix seconds. */
+  readonly quarantine_until?: number;
 };
 
 /** A durably completed state version. */
@@ -292,4 +311,56 @@ export function reconcile(log: AnchorLog, file: { version: number; state_sha256:
     return { action: "REFUSE", reason: `POLICY_STATE_ROLLBACK:state version ${file.version}, anchor head version ${head.version}` };
   }
   return { action: "REFUSE", reason: `POLICY_STATE_ANCHOR_MISMATCH:state version ${file.version}, anchor head version ${head?.version ?? "none"}` };
+}
+
+/**
+ * The exact state of the anchor head, from the payloads of completed PREPAREs
+ * (Phase 2D; D2): the head PREPARE's core state and quarantine, and the
+ * reservation table folded from the last full table through every later
+ * completed delta. Aborted and open PREPAREs are ignored. `covered` is false
+ * when the head cannot be rebuilt (a completed PREPARE without a payload
+ * after the last full table, or no full table at all).
+ */
+export type RebuildMaterial =
+  | { readonly covered: true; readonly version: number; readonly state_sha256: string; readonly state: unknown; readonly reservations: Record<string, unknown>; readonly quarantine_until?: number }
+  | { readonly covered: false; readonly reason: string };
+
+export function rebuildMaterial(log: AnchorLog): RebuildMaterial {
+  let table: Record<string, unknown> | undefined;
+  let headPayload: AnchorPayload | undefined;
+  let missing: string | undefined = "no full reservation table";
+  let open: AnchorEntry | undefined;
+  for (const e of log.entries) {
+    if (e.kind === "PREPARE") open = e;
+    else if (e.kind === "ABORT" && e.aborts !== undefined) open = undefined;
+    else if (e.kind === "DONE" && open) {
+      const p = open.payload;
+      if (p === undefined || typeof p !== "object" || p === null || typeof p.reservations !== "object" || p.reservations === null) {
+        table = undefined;
+        headPayload = undefined;
+        missing = `version ${open.version} has no payload`;
+      } else if (p.full) {
+        table = { ...p.reservations };
+        headPayload = p;
+        missing = undefined;
+      } else if (table !== undefined) {
+        table = { ...table, ...p.reservations };
+        headPayload = p;
+      } else {
+        headPayload = undefined;
+      }
+      open = undefined;
+    }
+  }
+  const head = log.head;
+  if (!head) return { covered: false, reason: "no completed version" };
+  if (table === undefined || headPayload === undefined || missing !== undefined) return { covered: false, reason: missing ?? "incomplete history" };
+  return {
+    covered: true,
+    version: head.version,
+    state_sha256: head.state_sha256,
+    state: headPayload.state,
+    reservations: table,
+    ...(headPayload.quarantine_until !== undefined ? { quarantine_until: headPayload.quarantine_until } : {}),
+  };
 }

@@ -291,16 +291,29 @@ for (const [fault, paid] of [
       // Operator reconciliation: needs the executor stopped (single-writer lock).
       // Run as the executor identity, which owns the journal.
       const cli = join(s.paths.app, "src", "isolation", "journal-cli.ts");
-      const verdict = paid ? "SETTLED" : "NOT_SETTLED";
-      const locked = s.runAsSync("executor", [NODE, cli, s.paths.journalDir, "resolve", h, verdict, "ledger checked"]);
+      const resolve = (verdict: string) => s.runAsSync("executor", [NODE, cli, s.paths.journalDir, "resolve", h, verdict, "ledger checked"]);
+      const locked = resolve("SETTLED");
       assert.notEqual(locked.status, 0);
       assert.match(locked.stderr, /JOURNAL_LOCKED/);
       await s.stopExecutor();
-      const ok = s.runAsSync("executor", [NODE, cli, s.paths.journalDir, "resolve", h, verdict, "ledger checked"]);
-      assert.equal(ok.status, 0, ok.stderr);
+      // Phase 2D (D5): no NOT_SETTLED resolution exists (absence is not evidence of non-execution).
+      const notSettled = resolve("NOT_SETTLED");
+      assert.notEqual(notSettled.status, 0);
+      assert.match(notSettled.stderr, /RESOLUTION_REFUSED/);
+      const settled = resolve("SETTLED");
       const rec = s.journal().inspect(h)!;
-      assert.equal(rec.state, "STARTED", "state is history; the verdict is attached, not substituted");
-      assert.equal(rec.resolution?.verdict, verdict);
+      assert.equal(rec.state, "STARTED", "state is history; a verdict is attached, never substituted");
+      if (paid) {
+        // A settlement verdict only with the MAC-verified ledger entry of this claim.
+        assert.equal(settled.status, 0, settled.stderr);
+        assert.equal(rec.resolution?.verdict, "SETTLED");
+        assert.equal(rec.resolution?.evidence.kind, "MOCK_LEDGER_MAC");
+      } else {
+        assert.notEqual(settled.status, 0, "no ledger entry: no settlement evidence");
+        assert.match(settled.stderr, /NO_SETTLEMENT_EVIDENCE/);
+        assert.equal(rec.resolution, undefined, "unproven: no verdict attached, the payment stays uncertain");
+      }
+      assert.equal(s.ledger().length, paid, "reconciliation never pays");
     } finally {
       await s.stop();
     }

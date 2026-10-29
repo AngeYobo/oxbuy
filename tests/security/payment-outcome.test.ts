@@ -6,8 +6,9 @@ import { INTERNAL_EXECUTOR_TOKEN_HEADER } from "@oxdeai/guard";
 import { createMockBuyAdapter } from "../../src/adapters/mock-buy/mock-buy.ts";
 import type { PaymentAdapter, PaymentReceipt } from "../../src/executor/payment-adapter.ts";
 import { createPaymentExecutor } from "../../src/executor/executor.ts";
+import { createLocalExecutionAuthority } from "../../src/executor/execution-authority.ts";
 import { createInMemoryPaymentJournal } from "../../src/executor/payment-journal.ts";
-import { createLocalSystem, type LocalSystemFaults } from "../../src/system.ts";
+import { createLocalSystem, LOCAL_JOURNAL_ID, type LocalSystemFaults } from "../../src/system.ts";
 import { authorize, requestFor, SERVICES } from "../helpers.ts";
 
 /** Executor adapter that settles through the mock, then fails in `fail`. */
@@ -158,6 +159,7 @@ test("R-F2h executor never hands the same intent to pay twice, even with a valid
     adapter: mock.adapter as PaymentAdapter,
     verification: { expectedAudience: audience, trustedKeySets: [keySet], trustedAuthorizationAuthorities: [authority], now: sys.harness.clock.now },
     journal: createInMemoryPaymentJournal(),
+    authority: createLocalExecutionAuthority(sys.harness.authService, sys.harness.executorReportKey, LOCAL_JOURNAL_ID),
   });
   const auth = await authorize(sys, requestFor(SERVICES.weather));
   const body = { action: { request: auth.request, intent_ref: auth.intent_ref }, authorization: auth.authorization };

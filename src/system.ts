@@ -17,7 +17,7 @@
  * composition is the test harness for protocol logic; the process-isolated
  * deployment is src/isolation/launcher.ts. See docs/ARCHITECTURE.md.
  */
-import { randomBytes } from "node:crypto";
+import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { createInMemoryReplayStore, type ReplayStore } from "@oxdeai/guard";
 import type { State } from "@oxdeai/core";
 import type { AgentGatewayClient, PurchaseResult } from "./agent/agent.ts";
@@ -25,6 +25,7 @@ import { createMockBuyAdapter, type MockBuy, type MockService } from "./adapters
 import { createAuthorizationService } from "./authorization/authorization-service.ts";
 import { paymentTarget, validatePurchaseRequest } from "./authorization/intent.ts";
 import { createInMemoryPolicyStateStore } from "./authorization/policy-state.ts";
+import { createLocalExecutionAuthority } from "./executor/execution-authority.ts";
 import { createPaymentExecutor, type PaymentExecutor } from "./executor/executor.ts";
 import { createInMemoryPaymentJournal } from "./executor/payment-journal.ts";
 import type { PaymentAdapter } from "./executor/payment-adapter.ts";
@@ -133,6 +134,9 @@ export type LocalSystemFaults = {
   readonly gatewayTimeoutMs?: number;
 };
 
+/** Placeholder journal id of the in-process harness (no execution domain). */
+export const LOCAL_JOURNAL_ID = "0".repeat(32);
+
 export function createLocalSystem(opts: { startTime?: number; initialState?: State | null; faults?: LocalSystemFaults } = {}) {
   let now = opts.startTime ?? DEFAULT_START_TIME;
   const clock = {
@@ -143,6 +147,13 @@ export function createLocalSystem(opts: { startTime?: number; initialState?: Sta
   };
 
   const policyStore = createInMemoryPolicyStateStore(opts.initialState === null ? undefined : (opts.initialState ?? initialPolicyState()));
+  // Executor message key (claims, voids, reports): the same signed path as the process deployment.
+  const reportKeys = generateKeyPairSync("ed25519");
+  const executorReportKey = {
+    privateKeyPem: reportKeys.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+    publicKeyPem: reportKeys.publicKey.export({ type: "spki", format: "pem" }).toString(),
+    kid: `exec-${randomBytes(4).toString("hex")}`,
+  };
   const authService = createAuthorizationService({
     policyVersion: POLICY_VERSION,
     issuer: PDP_ISSUER,
@@ -151,7 +162,10 @@ export function createLocalSystem(opts: { startTime?: number; initialState?: Sta
     ttlSeconds: POLICY.ttlSeconds,
     stateStore: policyStore,
     now: clock.now,
+    executorReportKey: { publicKeyPem: executorReportKey.publicKeyPem, kid: executorReportKey.kid },
   });
+  // No execution domain in-process: reservations are unbound, and so is this authority's (placeholder) journal id.
+  const authority = createLocalExecutionAuthority(authService, executorReportKey, LOCAL_JOURNAL_ID);
 
   const mockBuy = createMockBuyAdapter(Object.values(SERVICES));
   const internalToken = randomBytes(32).toString("hex");
@@ -168,6 +182,7 @@ export function createLocalSystem(opts: { startTime?: number; initialState?: Sta
     },
     // In-process harness only; the executor process uses the durable journal.
     journal: createInMemoryPaymentJournal(clock.now),
+    authority,
   });
   const replayStore = createSwitchableReplayStore();
   const gateway = createPaymentGateway({
@@ -205,7 +220,7 @@ export function createLocalSystem(opts: { startTime?: number; initialState?: Sta
 
   return {
     client,
-    harness: { clock, policyStore, replayStore, authService, gateway, executor, mockBuy: mockBuy.inspect },
+    harness: { clock, policyStore, replayStore, authService, gateway, executor, authority, executorReportKey, mockBuy: mockBuy.inspect },
   };
 }
 

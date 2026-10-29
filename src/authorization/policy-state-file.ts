@@ -28,17 +28,44 @@
  * crash-state table there; every load checks the file against the anchor
  * head. See policy-anchor.ts for what this does and does not detect.
  *
+ * Uncertain anchor writes (Phase 2D; L-1): any failure of an anchor append or
+ * of the re-read after it leaves the anchor's content unknown to this process,
+ * so the store refuses every further load and commit until a restart, which
+ * applies the crash-state table (torn tail acknowledged, open PREPARE aborted
+ * or completed). Independently, before every append the anchor is re-read and
+ * its tip must be the tip this process last verified: no entry is ever
+ * appended to a stale or unverified tip.
+ *
+ * Exact rebuild (Phase 2D; D2): every PREPARE carries the complete core state
+ * of its version and the reservation records it changes (the full table when
+ * the anchor has no coverage yet), so the anchor head can be rebuilt exactly
+ * (`rebuildStateBytes`; policy-cli rebuild). At startup a covered anchor is
+ * rebuilt and must hash to the head, or the store refuses to open.
+ *
  * File (0600, owned by the auth identity, in a 0700 directory):
- *   state.json  {"format", "binding", "version", "state", "reservations"}; bigints as {"$bigint": "<decimal>"}
+ *   state.json  {"format", "binding", "version", "state", "reservations", "quarantine_until"?}; bigints as {"$bigint": "<decimal>"}
  * Each commit: PREPARE (fsync) -> temp file (fsync) -> rename over state.json
  * -> fsync the directory -> DONE (fsync).
  */
-import { readFileSync, renameSync, unlinkSync } from "node:fs";
+import { appendFileSync, readFileSync, renameSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { State } from "@oxdeai/core";
 import { fsyncDir, writeTemp } from "../durable/durable-file.ts";
 import type { ExclusiveLock } from "../durable/exclusive-lock.ts";
-import { AnchorError, appendAnchor, isAppendOnly, readAnchor, reconcile, sha256, spentOf, type AnchorLog } from "./policy-anchor.ts";
+import {
+  AnchorError,
+  appendAnchor,
+  isAppendOnly,
+  nextEntry,
+  readAnchor,
+  rebuildMaterial,
+  reconcile,
+  sha256,
+  spentOf,
+  type AnchorEntry,
+  type AnchorLog,
+  type AnchorPayload,
+} from "./policy-anchor.ts";
 import type { PolicyStateStore, VersionedPolicyState } from "./policy-state.ts";
 import type { Reservations } from "./reservations.ts";
 
@@ -53,7 +80,7 @@ export type PolicyBinding = {
   readonly agentId: string;
 };
 
-export type StateFile = { format: string; binding: PolicyBinding; version: number; state: State; reservations: Reservations };
+export type StateFile = { format: string; binding: PolicyBinding; version: number; state: State; reservations: Reservations; quarantine_until?: number };
 
 export const encodePolicyState = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? { $bigint: x.toString() } : x));
 export const decodePolicyState = (s: string) =>
@@ -63,7 +90,45 @@ export const decodePolicyState = (s: string) =>
 
 /** Serialized state file (format v2). */
 export function stateFileBytes(f: Omit<StateFile, "format">): string {
-  return encodePolicyState({ format: POLICY_STATE_FORMAT, binding: f.binding, version: f.version, state: f.state, reservations: f.reservations } satisfies StateFile);
+  return encodePolicyState({
+    format: POLICY_STATE_FORMAT,
+    binding: f.binding,
+    version: f.version,
+    state: f.state,
+    reservations: f.reservations,
+    ...(f.quarantine_until !== undefined ? { quarantine_until: f.quarantine_until } : {}),
+  } satisfies StateFile);
+}
+
+/** Anchor payload of a version (Phase 2D; D2): its core state, quarantine, and the given reservation records. */
+export function anchorPayload(f: { state: State; quarantine_until?: number }, reservations: Reservations, full: boolean): AnchorPayload {
+  const json = (v: unknown) => JSON.parse(encodePolicyState(v)) as unknown;
+  return {
+    state: json(f.state),
+    reservations: json(reservations) as Record<string, unknown>,
+    ...(full ? { full: true as const } : {}),
+    ...(f.quarantine_until !== undefined ? { quarantine_until: f.quarantine_until } : {}),
+  };
+}
+
+/**
+ * The anchor head's state file, rebuilt from the anchor alone (Phase 2D; D2).
+ * Throws POLICY_REBUILD_INCOMPLETE without coverage and POLICY_REBUILD_MISMATCH
+ * unless the rebuilt bytes hash to the head.
+ */
+export function rebuildStateBytes(log: AnchorLog, binding: PolicyBinding): { bytes: string; version: number } {
+  const m = rebuildMaterial(log);
+  if (!m.covered) throw new Error(`POLICY_REBUILD_INCOMPLETE:${m.reason}`);
+  const decode = (v: unknown) => decodePolicyState(JSON.stringify(v));
+  const bytes = stateFileBytes({
+    binding,
+    version: m.version,
+    state: decode(m.state) as State,
+    reservations: decode(m.reservations) as Reservations,
+    ...(m.quarantine_until !== undefined ? { quarantine_until: m.quarantine_until } : {}),
+  });
+  if (sha256(bytes) !== m.state_sha256) throw new Error(`POLICY_REBUILD_MISMATCH:rebuilt version ${m.version} does not hash to the anchor head`);
+  return { bytes, version: m.version };
 }
 
 /** Serialized initial state file; written by the operator's init operation only. */
@@ -118,6 +183,12 @@ export type PolicyStateFaults = {
   readonly crashAfterDirSync?: boolean;
   /** The DONE append fails (I/O error, no crash): the commit must not be confirmed. */
   readonly failDoneAppend?: boolean;
+  /**
+   * The PREPARE append fails (Phase 2D, L-1): "full" written then EIO, "torn" a
+   * partial line then ENOSPC, "readback" written then the re-read fails. Fires
+   * once, on the first commit.
+   */
+  readonly failPrepare?: "full" | "torn" | "readback";
 };
 
 /**
@@ -157,9 +228,57 @@ export function openFilePolicyStateStore(
     appendAnchor(opts.anchorPath, log, { kind: "ABORT", aborts: r.pending.seq });
     log = readAnchor(opts.anchorPath);
   }
+  // Phase 2D (D2): a covered anchor must rebuild to exactly the head the state file matches.
+  let covered = rebuildMaterial(log).covered;
+  if (covered) {
+    try {
+      rebuildStateBytes(log, opts.binding);
+    } catch (err) {
+      throw new Error(`POLICY_ANCHOR_INCONSISTENT:${(err as Error).message}`);
+    }
+  }
 
-  /** Set when a commit's outcome is not known (DONE not written): refuse everything until restart. */
+  /** Set when the anchor's or a commit's outcome is not known: refuse everything until restart. */
   let broken: string | undefined;
+  let prepareFault = opts.faults?.failPrepare;
+
+  /**
+   * Append one anchor entry and re-read the anchor, or mark the store broken.
+   * The on-disk tip must still be the tip this process verified (stale-tip guard).
+   */
+  const append = (body: Parameters<typeof appendAnchor>[2], what: string): AnchorEntry => {
+    let onDisk: AnchorLog;
+    try {
+      onDisk = readAnchor(opts.anchorPath);
+    } catch (err) {
+      broken = `anchor unreadable before ${what}: ${(err as Error).message}`;
+      throw new Error(`POLICY_STATE_UNCONFIRMED:${broken}`);
+    }
+    if (onDisk.tip?.hash !== log.tip?.hash || onDisk.entries.length !== log.entries.length || onDisk.tornTail !== log.tornTail) {
+      broken = `anchor tip changed under this process before ${what}`;
+      throw new Error(`POLICY_STATE_UNCONFIRMED:${broken}`);
+    }
+    try {
+      const fault = body.kind === "PREPARE" ? prepareFault : undefined;
+      if (fault) prepareFault = undefined;
+      let entry: AnchorEntry;
+      if (fault === "torn") {
+        const { text } = nextEntry(log, body);
+        appendFileSync(opts.anchorPath, text.slice(0, Math.max(1, Math.floor(text.length / 3))));
+        throw Object.assign(new Error("ENOSPC: injected short PREPARE write"), { code: "ENOSPC" });
+      } else {
+        entry = appendAnchor(opts.anchorPath, log, body);
+      }
+      if (fault === "full") throw Object.assign(new Error("EIO: injected after a complete PREPARE write"), { code: "EIO" });
+      if (fault === "readback") throw Object.assign(new Error("EIO: injected anchor read-back failure"), { code: "EIO" });
+      log = readAnchor(opts.anchorPath);
+      if (log.tip?.hash !== entry.hash) throw new Error("anchor tip is not the entry just appended");
+      return entry;
+    } catch (err) {
+      broken = `${what} outcome unknown: ${(err as Error).message}`;
+      throw err;
+    }
+  };
 
   /** Current state; throws unless it is exactly the anchor head (detects replacement while running). */
   const read = (): VersionedPolicyState => {
@@ -171,7 +290,7 @@ export function openFilePolicyStateStore(
     if (!h || f.version !== h.version || sha256(raw) !== h.state_sha256) {
       throw new Error(`POLICY_STATE_ROLLBACK:state version ${f.version} does not match anchor head ${h?.version ?? "none"}`);
     }
-    return { version: f.version, state: f.state, reservations: f.reservations };
+    return { version: f.version, state: f.state, reservations: f.reservations, ...(f.quarantine_until !== undefined ? { quarantine_until: f.quarantine_until } : {}) };
   };
 
   return {
@@ -184,11 +303,18 @@ export function openFilePolicyStateStore(
       const cur = read();
       if (cur.version !== expectedVersion) return false;
       const version = expectedVersion + 1;
-      const bytes = stateFileBytes({ binding: opts.binding, version, state: next, reservations: reservations ?? cur.reservations });
+      const nextReservations = reservations ?? cur.reservations;
+      const q = cur.quarantine_until !== undefined ? { quarantine_until: cur.quarantine_until } : {};
+      const bytes = stateFileBytes({ binding: opts.binding, version, state: next, reservations: nextReservations, ...q });
       const sha = sha256(bytes);
-      // 1. PREPARE (write-ahead).
-      const prepared = appendAnchor(opts.anchorPath, log, { kind: "PREPARE", op: "COMMIT", version, state_sha256: sha, spent: spentOf(next) });
-      log = readAnchor(opts.anchorPath);
+      // Payload: the reservation records this version changes, or all of them if the anchor has no coverage yet.
+      const changed: Record<string, Reservations[string]> = {};
+      for (const [id, r] of Object.entries(nextReservations)) {
+        if (cur.reservations[id] === undefined || encodePolicyState(cur.reservations[id]) !== encodePolicyState(r)) changed[id] = r;
+      }
+      const payload = anchorPayload({ state: next, ...q }, covered ? changed : nextReservations, !covered);
+      // 1. PREPARE (write-ahead). Any failure here marks the store broken (L-1).
+      const prepared = append({ kind: "PREPARE", op: "COMMIT", version, state_sha256: sha, spent: spentOf(next), payload }, `PREPARE of version ${version}`);
       if (opts.faults?.crashAfterPrepare) process.kill(process.pid, "SIGKILL");
       // 2-4. temp + fsync, rename, directory fsync.
       try {
@@ -202,8 +328,7 @@ export function openFilePolicyStateStore(
       } catch (err) {
         // Nothing replaced state.json: cancel the PREPARE, then fail closed for this request.
         try {
-          appendAnchor(opts.anchorPath, log, { kind: "ABORT", aborts: prepared.seq });
-          log = readAnchor(opts.anchorPath);
+          append({ kind: "ABORT", aborts: prepared.seq }, `ABORT of version ${version}`);
         } catch {
           broken = "PREPARE could not be aborted";
         }
@@ -215,8 +340,8 @@ export function openFilePolicyStateStore(
         if (opts.faults?.crashAfterDirSync) process.kill(process.pid, "SIGKILL");
         if (opts.faults?.failDoneAppend) throw new Error("injected DONE append failure");
         // 5. DONE. Only after this may the caller release an authorization or acknowledge a report.
-        appendAnchor(opts.anchorPath, log, { kind: "DONE", version, state_sha256: sha });
-        log = readAnchor(opts.anchorPath);
+        append({ kind: "DONE", version, state_sha256: sha }, `DONE of version ${version}`);
+        covered = true;
       } catch (err) {
         // The new state may be in place without DONE: the caller must not release anything,
         // and this process must not continue; a restart applies the crash-state table.

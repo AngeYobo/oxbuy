@@ -18,10 +18,14 @@
  * timestamp, issuer, audience, expiry) come from this service, never from the
  * caller.
  *
- * Phase 2C: a second socket serves only the executor (settle channel,
- * src/isolation/settle-channel.ts):
- *   POST /v1/settle           a signed outcome report, with a peer-identity proof
- *   POST /v1/settle/expired   RESERVED reservations past expiry (cancellation candidates)
+ * Phase 2C/2D: a second socket serves only the executor (settle channel,
+ * src/isolation/settle-channel.ts); every request carries a peer-identity proof
+ * and a message signed with the executor's key:
+ *   POST /v1/claim    execution claim, committed before it is acknowledged (Phase 2D)
+ *   POST /v1/void     synchronous VOID of a rejected authorization or abandoned claim (Phase 2D)
+ *   POST /v1/settle   outcome report for a claim
+ * Expired, unclaimed reservations are released by this service on its own
+ * clock, every `expiryReleaseIntervalMs`.
  *
  * Policy state is persistent and operator-initialized
  * (src/isolation/policy-state-admin.ts). At startup the service computes its
@@ -60,6 +64,7 @@ const serviceOptions = {
   signingKey: { privateKeyPem: pdp.privateKeyPem, kid: pdp.kid },
   executorReportKey: config.executorReportKey,
   executionDomain: config.executionDomain,
+  minRemainingSeconds: config.minRemainingSeconds,
 };
 // The binding comes from this service's own engine, not from any input.
 const authority = createAuthorizationService({ ...serviceOptions, stateStore: createInMemoryPolicyStateStore(undefined) }).trustMaterial.authority;
@@ -89,7 +94,13 @@ try {
     binding,
     lock,
     anchorPath: config.anchorPath,
-    faults: { crashAfterPrepare: config.faults?.crashAfterPrepare, crashAfterRename: config.faults?.crashAfterRename, crashAfterDirSync: config.faults?.crashAfterDirSync, failDoneAppend: config.faults?.failDoneAppend },
+    faults: {
+      crashAfterPrepare: config.faults?.crashAfterPrepare,
+      crashAfterRename: config.faults?.crashAfterRename,
+      crashAfterDirSync: config.faults?.crashAfterDirSync,
+      failDoneAppend: config.faults?.failDoneAppend,
+      failPrepare: config.faults?.failPrepare,
+    },
   });
 } catch (err) {
   refuse(78, (err as Error).message);
@@ -164,23 +175,49 @@ const settleServer = await serveJson(config.settleSocketPath, 0o660, {
     if (result.status === "APPLIED" && config.faults?.crashAfterSettleCommit) process.kill(process.pid, "SIGKILL");
     return { status: 200, body: result };
   },
-  "/v1/settle/expired": async (envelope) => {
+  "/v1/claim": async (envelope) => {
     const c = peerChecked(envelope);
-    if (!c.ok) return { status: 403, body: { status: "REJECTED", reason: c.reason } };
-    const grace = Number(c.body.grace_seconds);
-    if (!Number.isSafeInteger(grace) || grace < 0) return { status: 400, body: { status: "REJECTED", reason: "SETTLE_INVALID_GRACE" } };
-    try {
-      return { status: 200, body: { expired: await service.expiredReservations(grace) } };
-    } catch (err) {
-      return { status: 503, body: { status: "REJECTED", reason: (err as Error).message } };
+    if (!c.ok) {
+      audit({ event: "claim_refused", reason: c.reason });
+      return { status: 403, body: { status: "REJECTED", reason: c.reason } };
     }
+    const result = await service.claim(c.body.claim);
+    audit({ event: "claim", ...result });
+    if (result.status === "CLAIMED" && config.faults?.crashAfterClaimCommit) process.kill(process.pid, "SIGKILL");
+    return { status: 200, body: result };
+  },
+  "/v1/void": async (envelope) => {
+    const c = peerChecked(envelope);
+    if (!c.ok) {
+      audit({ event: "void_refused", reason: c.reason });
+      return { status: 403, body: { status: "REJECTED", reason: c.reason } };
+    }
+    const result = await service.voidAuthorization(c.body.void);
+    audit({ event: "void", ...result });
+    if (result.status === "APPLIED" && config.faults?.crashAfterVoidCommit) process.kill(process.pid, "SIGKILL");
+    return { status: 200, body: result };
   },
 });
+
+// Expired, unclaimed reservations: released on this service's own clock (no claim can be granted for them).
+let releasing = false;
+const expiryTimer = setInterval(() => {
+  if (releasing) return;
+  releasing = true;
+  service
+    .releaseExpired()
+    .then((n) => {
+      if (n > 0) audit({ event: "expired_released", count: n });
+    })
+    .catch((err) => audit({ event: "expired_release_error", error: (err as Error).message }))
+    .finally(() => (releasing = false));
+}, config.expiryReleaseIntervalMs);
 
 emit({ event: "ready", role: "auth", pid: process.pid });
 
 function shutdown() {
   // The writer lock is released by the kernel when this process exits.
+  clearInterval(expiryTimer);
   settleServer.close();
   server.close(() => process.exit(0));
 }
