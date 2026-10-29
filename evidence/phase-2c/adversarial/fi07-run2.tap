@@ -1,0 +1,22 @@
+TAP version 13
+# Subtest: FI-07a restart with a pending reservation, same deployment: auth, executor, and gateway restart; the reservation stays charged and pays exactly once
+ok 1 - FI-07a restart with a pending reservation, same deployment: auth, executor, and gateway restart; the reservation stays charged and pays exactly once
+  ---
+  duration_ms: 4463.455679
+  type: 'test'
+  ...
+# Subtest: FI-07b restart with a pending reservation, new deployment (new PDP key): the old authorization is refused, stays charged until its own domain cancels it, never pays
+ok 2 - FI-07b restart with a pending reservation, new deployment (new PDP key): the old authorization is refused, stays charged until its own domain cancels it, never pays
+  ---
+  duration_ms: 8260.136401
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 13598.983879

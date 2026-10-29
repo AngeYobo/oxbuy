@@ -1,0 +1,149 @@
+TAP version 13
+# Subtest: AN1 a completed chain: head is the latest DONE, nothing pending
+ok 1 - AN1 a completed chain: head is the latest DONE, nothing pending
+  ---
+  duration_ms: 61.646555
+  type: 'test'
+  ...
+# Subtest: AN2 the crash-state table, row by row
+ok 2 - AN2 the crash-state table, row by row
+  ---
+  duration_ms: 2.329356
+  type: 'test'
+  ...
+# Subtest: AN3 aborted versions never become completed (restore) sources
+ok 3 - AN3 aborted versions never become completed (restore) sources
+  ---
+  duration_ms: 0.510946
+  type: 'test'
+  ...
+# Subtest: AN4 tampering, reordering, truncation at the start, and protocol violations are detected
+not ok 4 - AN4 tampering, reordering, truncation at the start, and protocol violations are detected
+  ---
+  duration_ms: 2.553832
+  type: 'test'
+  location: '/workspaces/oxdeai-celo-poc/tests/authorization/policy-anchor.test.ts:58:1'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (file:///workspaces/oxdeai-celo-poc/tests/authorization/policy-anchor.test.ts:72:10)
+    Test.runInAsyncScope (node:async_hooks:227:14)
+    Test.run (node:internal/test_runner/test:1402:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+    Test.postRun (node:internal/test_runner/test:1542:19)
+    Test.run (node:internal/test_runner/test:1467:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+  ...
+# Subtest: AN5 a torn final line is tolerated only as the last line, until an ABORT names it
+ok 5 - AN5 a torn final line is tolerated only as the last line, until an ABORT names it
+  ---
+  duration_ms: 0.694896
+  type: 'test'
+  ...
+# Subtest: RS1 a new reservation is RESERVED, bound to its domain, and charged its full amount
+ok 6 - RS1 a new reservation is RESERVED, bound to its domain, and charged its full amount
+  ---
+  duration_ms: 0.965428
+  type: 'test'
+  ...
+# Subtest: RS2 allowed transitions and the amount released by each
+ok 7 - RS2 allowed transitions and the amount released by each
+  ---
+  duration_ms: 1.136682
+  type: 'test'
+  ...
+# Subtest: RS3 an uncertain or executing payment is never released except by evidence it did not pay
+ok 8 - RS3 an uncertain or executing payment is never released except by evidence it did not pay
+  ---
+  duration_ms: 0.835937
+  type: 'test'
+  ...
+# Subtest: RS4 duplicates are ALREADY_APPLIED, older news is STALE, contradictions are refused; nothing releases twice
+ok 9 - RS4 duplicates are ALREADY_APPLIED, older news is STALE, contradictions are refused; nothing releases twice
+  ---
+  duration_ms: 4.067799
+  type: 'test'
+  ...
+# Subtest: RS5 binding, amount, and reason are validated before anything changes
+ok 10 - RS5 binding, amount, and reason are validated before anything changes
+  ---
+  duration_ms: 0.485833
+  type: 'test'
+  ...
+# Subtest: RS6 transitions are deterministic and recorded in the history
+ok 11 - RS6 transitions are deterministic and recorded in the history
+  ---
+  duration_ms: 2.272452
+  type: 'test'
+  ...
+# Subtest: RS7 restore freezes every non-final reservation as UNCERTAIN and keeps its charge
+ok 12 - RS7 restore freezes every non-final reservation as UNCERTAIN and keeps its charge
+  ---
+  duration_ms: 0.388011
+  type: 'test'
+  ...
+# Subtest: OR1 a valid report verifies and yields its facts and journal
+ok 13 - OR1 a valid report verifies and yields its facts and journal
+  ---
+  duration_ms: 4.85648
+  type: 'test'
+  ...
+# Subtest: OR2 any change to a signed report, a foreign key, or a bad shape is refused
+ok 14 - OR2 any change to a signed report, a foreign key, or a bad shape is refused
+  ---
+  duration_ms: 5.555614
+  type: 'test'
+  ...
+# Subtest: OR3 derivation: NOT_EXECUTED only when the journal proves `pay` did not (successfully) run
+ok 15 - OR3 derivation: NOT_EXECUTED only when the journal proves `pay` did not (successfully) run
+  ---
+  duration_ms: 1.24251
+  type: 'test'
+  ...
+# Subtest: OR4 one acknowledgement key per outcome and reason
+ok 16 - OR4 one acknowledgement key per outcome and reason
+  ---
+  duration_ms: 0.27628
+  type: 'test'
+  ...
+# Subtest: OR5 settle: the reporting journal must be the current domain and the reservation's domain; duplicates never release twice
+ok 17 - OR5 settle: the reporting journal must be the current domain and the reservation's domain; duplicates never release twice
+  ---
+  duration_ms: 19.752575
+  type: 'test'
+  ...
+# Subtest: ID1 the approved configuration (synthetic copy of this deployment) is accepted
+ok 18 - ID1 the approved configuration (synthetic copy of this deployment) is accepted
+  ---
+  duration_ms: 5.212829
+  type: 'test'
+  ...
+# Subtest: ID2 unsafe synthetic configurations are rejected
+ok 19 - ID2 unsafe synthetic configurations are rejected
+  ---
+  duration_ms: 0.613449
+  type: 'test'
+  ...
+# Subtest: ID3 the real accounts pass validation, and the override variables are ignored
+ok 20 - ID3 the real accounts pass validation, and the override variables are ignored
+  ---
+  duration_ms: 14.343245
+  type: 'test'
+  ...
+# Subtest: ID4 process level, override variables set (R4 F5 configuration): the agent is still oxdeai-agent and cannot reach the auth, executor, or settle sockets
+ok 21 - ID4 process level, override variables set (R4 F5 configuration): the agent is still oxdeai-agent and cannot reach the auth, executor, or settle sockets
+  ---
+  duration_ms: 3008.005265
+  type: 'test'
+  ...
+1..21
+# tests 21
+# suites 0
+# pass 20
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5542.338271

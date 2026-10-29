@@ -1,0 +1,7 @@
+an4 exit=0
+anchor-suite exit=0
+cx3-reproducer exit=1
+cx1-reproducer exit=0
+cx2-reproducer exit=0
+typecheck exit=0
+full-suite exit=0

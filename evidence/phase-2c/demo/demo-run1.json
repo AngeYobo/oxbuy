@@ -1,0 +1,69 @@
+{
+  "artifact": "88fa7643c7f265135742df60b065b7647f80d0a56c0adea0b8a495f40c22164d",
+  "processes": {
+    "operator_uid": 1000,
+    "gateway_pid": 55864,
+    "executor_pid": 55795
+  },
+  "agent": {
+    "agent_uid": 999,
+    "weather": {
+      "stage": "purchase",
+      "result": {
+        "decision": "ALLOW",
+        "executed": true,
+        "status": 200,
+        "receipt": {
+          "settled": true,
+          "reference": "mock-cb6e8c0d8b9a284cc4afdb6fa781cac9",
+          "network": "mock-celo",
+          "asset": "mock-usdc",
+          "amount": "10000",
+          "pay_to": "0x1111111111111111111111111111111111111111",
+          "response_status": 200,
+          "response_body": "{\"mock\":true,\"service_id\":\"weather-api\"}"
+        },
+        "auth_id": "beec99b3a23b169a690d4a533bc5a2c07d36deaa38015a60a42315e20f9e4587",
+        "intent_hash": "4cf63d9f430cf5b1db6b7a81326663bbb7c6adfd32a8c7101efcb548938eb8a3"
+      }
+    },
+    "unlisted": {
+      "stage": "authorize",
+      "decision": "DENY",
+      "reasons": [
+        "ALLOWLIST_TARGET"
+      ]
+    },
+    "executor_socket_connect": "EACCES",
+    "wallet_key_read": "EACCES"
+  },
+  "ledger_payments": 1,
+  "journal": [
+    {
+      "intent_hash": "4cf63d9f430cf5b1db6b7a81326663bbb7c6adfd32a8c7101efcb548938eb8a3",
+      "state": "SETTLED"
+    }
+  ],
+  "journal_auths": [
+    {
+      "auth_id": "beec99b3a23b169a690d4a533bc5a2c07d36deaa38015a60a42315e20f9e4587",
+      "disposition": "RESERVED"
+    }
+  ],
+  "policy_state": {
+    "version": 2,
+    "budget_limit": {
+      "agent-celo-poc-1": "20000"
+    },
+    "spent_in_period": {
+      "agent-celo-poc-1": "10000"
+    },
+    "reservations": {
+      "beec99b3a23b169a690d4a533bc5a2c07d36deaa38015a60a42315e20f9e4587": {
+        "state": "CONFIRMED",
+        "amount": "10000",
+        "charged": "10000"
+      }
+    }
+  }
+}

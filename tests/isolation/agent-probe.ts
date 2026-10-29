@@ -236,8 +236,8 @@ switch (command) {
     const [appDir, walletKeyPath, ledgerPath, intentHash] = args;
     const { createMockBuyAdapter } = (await import(`${appDir}/src/adapters/mock-buy/mock-buy.ts`)) as typeof import("../../src/adapters/mock-buy/mock-buy.ts");
     const { withMockSettlement } = (await import(`${appDir}/src/adapters/mock-buy/mock-settlement.ts`)) as typeof import("../../src/adapters/mock-buy/mock-settlement.ts");
-    const adapter = withMockSettlement(createMockBuyAdapter(Object.values(SERVICES)).adapter, { walletKeyPath: walletKeyPath!, ledgerPath: ledgerPath! });
-    const pay = await attemptAsync(() => adapter.pay({ intent_hash: intentHash!, request: requestFor(SERVICES.weather) }));
+    const adapter = withMockSettlement(createMockBuyAdapter(Object.values(SERVICES)).adapter, { walletKeyPath: walletKeyPath!, ledgerPath: ledgerPath!, journalId: "0".repeat(32) });
+    const pay = await attemptAsync(() => adapter.pay({ intent_hash: intentHash!, request: requestFor(SERVICES.weather), claim_id: "0".repeat(32) }));
     const forgeLedger = attempt(() => appendFileSync(ledgerPath!, `${JSON.stringify({ forged: true })}\n`));
     out = { pay, forgeLedger };
     break;

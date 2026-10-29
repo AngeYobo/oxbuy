@@ -1,4 +1,4 @@
-# Demo: Phase 1 and Phase 2A/2B (local, mock only)
+# Demo: Phase 1 and Phase 2A/2B/2C (local, mock only)
 
 Everything here runs offline against a mock payment adapter. No wallet is
 created or imported, no network request is made, and nothing touches Celo.
@@ -55,7 +55,7 @@ Other reasons come from the gateway or executor.
 The script exits non-zero if any scenario's decision differs from the
 expected one.
 
-## Isolated demo (Phase 2B)
+## Isolated demo (Phase 2B, durable state since 2C)
 
 `npm run demo:isolated` launches only an operator-approved artifact from the
 trust store (`$OXDEAI_TRUST_STORE`, default `~/.oxdeai-celo-poc/trust`),
@@ -78,14 +78,23 @@ node src/isolation/policy-cli.ts init /var/tmp/oxdeai/policy 50000   # once; fai
 export OXDEAI_POLICY_STATE_ROOT=/var/tmp/oxdeai/policy
 ```
 
-Without it, the demo prints BLOCKED and exits 2. The four dedicated accounts
+Phase 2C: it also needs an initialized executor state root (payment journal
+and mock ledger), reachable by `oxdeai-executor`:
+
+```sh
+node src/isolation/executor-cli.ts provision /var/tmp/oxdeai/executor
+node src/isolation/executor-cli.ts init /var/tmp/oxdeai/executor     # once; JOURNAL_EXISTS afterwards
+export OXDEAI_EXECUTOR_STATE_ROOT=/var/tmp/oxdeai/executor
+```
+
+Without either, the demo prints BLOCKED and exits 2. The four dedicated accounts
 (`oxdeai-agent`, `-gateway`, `-auth`, `-executor`) must exist. It starts
 the auth service (under `flock`), the executor, and the gateway, each as its
 own account, from that artifact. The budget persists across runs: once it
 is spent, later runs are denied with `BUDGET_EXCEEDED` until the operator
-initializes a new policy identity. The runtime directory, including the
-executor's mock ledger and payment journal, is deleted when the demo stops;
-only the policy state persists (`docs/ISOLATION.md` A9, N2). It then runs `src/isolation/agent-main.ts`
+initializes a new policy identity. The runtime directory is deleted when the demo
+stops; the policy state (budget, reservations, anchor) and the executor state
+(journal, ledger) persist (Phase 2C, docs/FINANCIAL-INTEGRITY.md). It then runs `src/isolation/agent-main.ts`
 as the `oxdeai-agent` account through `sudo setpriv --no-new-privs`. This needs
 passwordless sudo; without it the demo prints `{"status":"BLOCKED"}` and
 exits 2 rather than running everything as one user. The agent:
@@ -93,6 +102,13 @@ exits 2 rather than running everything as one user. The agent:
 - tries the unlisted service: PDP DENY `ALLOWLIST_TARGET`;
 - tries to connect to the executor socket and to read the mock wallet key:
   both `EACCES`.
+
+The output also reports the journal (intents and consumed auth_ids), and the
+policy state: version, budget limit, charge, and each reservation's state
+(CONFIRMED after a settled payment). Recorded runs with a 20000 budget on the
+same state roots (`evidence/phase-2c/demo/`): run 1 and 2 ALLOW (ledger 1, 2;
+charge 10000, 20000), run 3 `BUDGET_EXCEEDED` (ledger 2); every run denies
+`unlisted` with `ALLOWLIST_TARGET`.
 
 Pids, `auth_id` and `intent_hash` differ per run. See `docs/ISOLATION.md`.
 

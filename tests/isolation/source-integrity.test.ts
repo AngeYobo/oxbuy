@@ -17,7 +17,7 @@ import { after, before, test } from "node:test";
 import { approveArtifact, removeTree, sealArtifact, verifyArtifact, verifyCopy } from "../../src/isolation/artifact.ts";
 import { agentCommand, agentIdentityUnavailableReason } from "../../src/isolation/identity.ts";
 import { launchIsolatedSystem as launchFromCheckout } from "../../src/isolation/launcher.ts";
-import { freshPolicyState, loadLauncher, newStore, removeStateRoot, REPO_ROOT } from "./trusted-artifact.ts";
+import { freshExecutorState, freshPolicyState, loadLauncher, newStore, removeStateRoot, REPO_ROOT } from "./trusted-artifact.ts";
 
 const BLOCKED = agentIdentityUnavailableReason();
 const opts = BLOCKED === null ? {} : { skip: `BLOCKED: ${BLOCKED}` };
@@ -72,8 +72,14 @@ async function assertLaunchRefused(launch: () => Promise<{ stop(): Promise<void>
 
 let store: string;
 let approved: string;
-// Phase 2B-R3: launches need an operator-initialized persistent policy state root.
+// Phase 2B-R3 / 2C: launches need operator-initialized persistent policy and executor state roots.
 let policyStateRoot: string;
+/** Each launch gets its own executor state (journal + ledger persist across launches since Phase 2C). */
+function executorStateRoot(): string {
+  const r = freshExecutorState();
+  cleanups.push(() => removeStateRoot(r));
+  return r;
+}
 before(() => {
   if (BLOCKED !== null) return;
   policyStateRoot = freshPolicyState({ budget: "100000000" });
@@ -88,7 +94,7 @@ after(() => {
 });
 
 test("SI-01 a valid protected artifact launches and pays exactly once", opts, async () => {
-  const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT, policyStateRoot });
+  const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT, policyStateRoot, executorStateRoot: executorStateRoot() });
   try {
     assert.equal(sys.artifact.digest, approved);
     // Phase 2B-R1 adaptation: the service identities cannot enter the
@@ -114,7 +120,7 @@ for (const target of ["src/isolation/executor-main.ts", "src/isolation/gateway-m
     plant(join(wt, target), marker);
 
     // The operator launches the approved artifact: the working tree is not an input.
-    const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT, policyStateRoot });
+    const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT, policyStateRoot, executorStateRoot: executorStateRoot() });
     try {
       const out = (await sys.runAgent(PROBE, ["buy", sys.paths.publicSocket, "weather"])).result as any;
       assert.equal(out.result.decision, "ALLOW");
@@ -155,7 +161,7 @@ test("SI-03 agent modifies OxDeAI dependencies in node_modules: the sealed artif
   const resealed = sealArtifact({ sourceRoot: wt, store });
   assert.equal(resealed.digest, approved, "dependencies come from the verified registry tarball, not the working tree");
 
-  const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT, policyStateRoot });
+  const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT, policyStateRoot, executorStateRoot: executorStateRoot() });
   try {
     const forged = (await sys.runAgent(PROBE, ["forge", sys.paths.publicSocket])).result as Record<string, any>;
     for (const v of Object.values(forged)) assert.equal(v.decision, "DENY", "signature verification intact");
@@ -185,7 +191,7 @@ test("SI-05 agent cannot alter the trust store, the approval, the artifact, or t
     assert.notEqual(r.status, 0, `agent wrote ${target}`);
     assert.match(r.stderr, /Permission denied/);
   }
-  const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT, policyStateRoot });
+  const sys = await (await loadLauncher(store, approved)).launchIsolatedSystem({ agentCwd: REPO_ROOT, policyStateRoot, executorStateRoot: executorStateRoot() });
   try {
     for (const cfg of [sys.paths.executorConfig, sys.paths.gatewayConfig]) {
       const r = asAgent(`printf '{}' > '${cfg}'`);

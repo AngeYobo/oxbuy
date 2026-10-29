@@ -1,0 +1,1 @@
+{"status":"BLOCKED","reason":"no executor state: set OXDEAI_EXECUTOR_STATE_ROOT to an initialized executor state root (executor-cli.ts provision + init; docs/DEMO.md)"}

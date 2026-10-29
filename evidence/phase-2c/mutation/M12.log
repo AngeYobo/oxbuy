@@ -1,0 +1,59 @@
+TAP version 13
+# Subtest: FI-02 payment rejected before execution (quoteDrift): no payment; released by its own domain; the authorization can never pay
+not ok 1 - FI-02 payment rejected before execution (quoteDrift): no payment; released by its own domain; the authorization can never pay
+  ---
+  duration_ms: 3395.902935
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-IhtAnn/tests/isolation/financial-integrity.test.ts:423:3'
+  failureType: 'testCodeFailure'
+  error: '{"decision":"ALLOW","executed":true,"status":200,"receipt":{"settled":true,"reference":"mock-cb6e8c0d8b9a284cc4afdb6fa781cac9","network":"mock-celo","asset":"mock-usdc","amount":"10000","pay_to":"0x1111111111111111111111111111111111111111","response_status":200,"response_body":"{\\"mock\\":true,\\"service_id\\":\\"weather-api\\"}"},"auth_id":"1ffb4df0d6ef10a4773e6ab2ffd5ac604c95b59470a185c5fc49a50b91795cbc","intent_hash":"ff01ebf560ebb4a15445d7e72d60f10b63b8750c0cb99a35b59b2c3717a9701c"}'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'ALLOW'
+  actual: 'ALLOW'
+  operator: 'notStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-IhtAnn/tests/isolation/financial-integrity.test.ts:430:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+# Subtest: FI-02 payment rejected before execution (refuseBeforeSigning): no payment; released by its own domain; the authorization can never pay
+ok 2 - FI-02 payment rejected before execution (refuseBeforeSigning): no payment; released by its own domain; the authorization can never pay
+  ---
+  duration_ms: 4957.397367
+  type: 'test'
+  ...
+# Subtest: R-F1a recipient changes between executor quote and pay: refused before signing, DENY, no payment
+ok 3 - R-F1a recipient changes between executor quote and pay: refused before signing, DENY, no payment
+  ---
+  duration_ms: 21.078424
+  type: 'test'
+  ...
+# Subtest: R-F1a network changes between executor quote and pay: refused before signing, DENY, no payment
+ok 4 - R-F1a network changes between executor quote and pay: refused before signing, DENY, no payment
+  ---
+  duration_ms: 6.243146
+  type: 'test'
+  ...
+# Subtest: R-F1a asset changes between executor quote and pay: refused before signing, DENY, no payment
+ok 5 - R-F1a asset changes between executor quote and pay: refused before signing, DENY, no payment
+  ---
+  duration_ms: 16.756658
+  type: 'test'
+  ...
+# Subtest: R-F1a price changes between executor quote and pay: refused before signing, DENY, no payment
+ok 6 - R-F1a price changes between executor quote and pay: refused before signing, DENY, no payment
+  ---
+  duration_ms: 6.637343
+  type: 'test'
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 5
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9397.654892

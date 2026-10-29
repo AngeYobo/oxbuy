@@ -1,0 +1,11 @@
+CX1_first: "ALLOW"
+CX1_second: "ALLOW"
+CX1_third_before_rollback: "DENY:BUDGET_EXCEEDED"
+CX1_restart_after_one_step_rollback: "STARTED"
+CX1_authorize_after_rollback: "ALLOW"
+CX1_result: {"budget":"20000","spent":{"agent-celo-poc-1":{"$bigint":"20000"}},"reservations":2,"anchor_tail":["{\"kind\":\"ABORT\",\"version\":1,\"state_sha256\":\"6cd33ebc829920e276ded8a0d6f4a6a89469c01c373f2c","{\"kind\":\"COMMIT\",\"version\":2,\"state_sha256\":\"fa24b46c13788ea232ff33f8586f35048bd72bf4df911",""]}
+CX2_authorized: {"auth_id":"924d7f880b63","expiry_in_s":3}
+CX2_reservation_after_new_deployment_cancel: {"state":"EXECUTING","charged":"10000","spent":{"agent-celo-poc-1":{"$bigint":"10000"}}}
+CX2_old_executor_payment: {"decision":"ALLOW","executed":true,"ledger_old":1}
+CX2_new_deployment_can_authorize_again: "DENY:BUDGET_EXCEEDED"
+CX2_result: {"budget":"10000","payments_made":1,"final_spent":{"agent-celo-poc-1":{"$bigint":"10000"}},"reservation":"EXECUTING"}

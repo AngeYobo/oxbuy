@@ -1,4 +1,4 @@
-# Architecture: OxDeAI x402 Gateway, Phase 1 / 1R / 2A / 2B
+# Architecture: OxDeAI x402 Gateway, Phase 1 / 1R / 2A / 2B / 2C
 
 Phase 1 is a local, single-process prototype. It uses the published OxDeAI
 packages unmodified and a deterministic mock of the `@celo/buy` quote/pay
@@ -12,7 +12,7 @@ artifact verified before import (`src/isolation/artifact.ts`,
 `src/isolation/trusted-entry.ts`). The process layout, IPC, access control,
 trust store, journal, and recovery procedure are in `docs/ISOLATION.md`.
 
-Phase 2B (current) separates four security domains under dedicated OS
+Phase 2B separates four security domains under dedicated OS
 accounts (`docs/ISOLATION.md` §0):
 - **agent** (`oxdeai-agent`): untrusted;
 - **gateway** (`oxdeai-gateway`): the PEP; it holds no signing key, no
@@ -29,9 +29,25 @@ signing key or wallet, pay directly, change policy state or code, or obtain
 an authorization outside policy (CONFORMANCE.md, P2B-01..20). The
 independent Phase 2B-R4 audit reproduced these results. Both were manual
 experiments; only some of the twenty controls have automated tests in
-`npm test` (CONFORMANCE.md lists which). These results hold for the
-standard launch; the `OXDEAI_AGENT_UID` / `OXDEAI_AGENT_GID` override
-weakens the agent/gateway boundary (limitation 16).
+`npm test` (CONFORMANCE.md lists which). In Phase 2B the
+`OXDEAI_AGENT_UID` / `OXDEAI_AGENT_GID` override weakened the agent/gateway
+boundary (limitation 16); Phase 2C removed it.
+
+Phase 2C (current, mock only) adds financial integrity on top of the same
+four domains (`docs/FINANCIAL-INTEGRITY.md`):
+- every ALLOW is a **reservation** (RESERVED → CONFIRMED / RELEASED /
+  UNCERTAIN) that moves only on signed executor **outcome reports**
+  delivered over an OS-restricted settle channel; a reservation is released
+  only with durable proof that its authorization can never pay;
+- authorizations are bound to one **execution domain** (executor uid +
+  journal identity) through the signed audience;
+- the **payment journal and ledger are persistent** (executor state root),
+  written with an fsync/link/rename protocol, and never recreated;
+- **policy-state rollback detection** with an append-only, hash-chained
+  anchor outside the state directory (CONDITIONAL: not against root,
+  the operator, or whole-filesystem rollback);
+- **kernel `flock(2)` writer locks** for the auth service and the executor;
+- **identity validation** by account name only, before any service starts.
 
 **Not claimed:**
 - that a compromised gateway cannot cause payments. It can request any
@@ -40,9 +56,14 @@ weakens the agent/gateway boundary (limitation 16).
   against root. This includes the operator's launch environment (F5),
   restoring older policy state (N3), and starting services outside the
   launcher (N1).
-- that the budget equals settled spending. It counts authorizations at
-  decision commit (F3).
-- that uncertain payment records survive a full redeployment (N2).
+- that the budget equals settled spending. It charges the authorized
+  maximum at decision commit and lowers it to the settled amount only when a
+  verified SETTLED report arrives; uncertain reservations keep the maximum
+  (F3, docs/FINANCIAL-INTEGRITY.md).
+- rollback resistance against root, the operator, or a whole-filesystem
+  snapshot (N3 CONDITIONAL).
+- crash durability under power loss (process crashes are tested; power loss
+  is not).
 - readiness for real payments.
 
 The single-process composition (`src/system.ts`)
@@ -233,6 +254,9 @@ commits no state.
 | Hashed object ↔ executed object | JSON round-trip + deep freeze before verification | Tested with caller mutation after submit. |
 | Authorized binding ↔ payment | `pay` receives `AuthorizedPayment` and must re-check payee, network, asset, price before signing | Mock only. Tested: each changed between quote and pay is refused before signing. Not verified for `@celo/buy`. |
 | Payment ↔ reported outcome | executor journal + receipt check + gateway outcome boundary | Mock only. Tested: post-settlement error, lost connection, timeout, ambiguous and out-of-binding receipts are INDETERMINATE. |
+| Executor outcome ↔ budget (Phase 2C) | signed outcome reports from the reservation's own execution domain, over a settle socket restricted to the executor group with a kernel-attested peer proof | Mock only, real processes. Tested: crash windows, duplicate and contradictory reports, foreign-domain and forged reports, uncertain outcomes held (CX2a-d, FI-02..05). |
+| Policy state ↔ rollback (Phase 2C) | append-only hash-chained anchor outside the state directory; PREPARE/DONE commit protocol | Tested with real processes (CX1a-d) and unit tests (AN1-AN10). CONDITIONAL: root, operator, whole-filesystem rollback not covered. |
+| Journal ↔ restarts, redeployment, corruption, concurrent writers (Phase 2C) | persistent executor state root; fsync + link/rename records; kernel `flock` on the executor's own descriptor | Tested with real processes (FI-07a/b, FI-09, FI-10, FI-12/13). Power loss not tested. |
 
 ## Known limitations
 
@@ -297,18 +321,14 @@ These are stated as limits of Phase 1, not as solved properties.
     refusals on `PaymentRefusedError` being thrown only when nothing was
     signed. Which `@celo/buy` errors guarantee "not signed" is not verified;
     until it is, a buy adapter should map every `pay` error to unknown.
-14. **Payment journal.** The executor process uses the durable file journal
-    (`docs/ISOLATION.md` §5): survives executor and gateway restarts and
-    crashes within one deployment (P2A-08, P2A-09), never auto-resolves
-    STARTED. It is deleted with the runtime root when the deployment is torn
-    down, so unresolved records do not survive redeployment (N2). Its
-    pid-based stale-lock takeover can admit two writers (B6); per-intent
-    O_EXCL creation still prevented duplicate reservations in the R4
-    experiments. The in-process harness uses an in-memory journal with the
-    same interface. Durability is bounded by the local disk; reconciliation
-    is a manual operator step (`docs/ISOLATION.md` §6). A persistent journal,
-    a robust exclusive lock, and durable settlement reconciliation are
-    required before real payments.
+14. **Payment journal.** Phase 2B: the journal lived in the runtime root and
+    was deleted at teardown (N2), with a pid-based stale-lock takeover (B6).
+    Phase 2C: it is persistent in the executor state root, survives
+    redeployment (FI-07a/b), refuses to start when missing or damaged
+    (FI-09, FI-10), and uses a kernel `flock(2)` lock (FI-12/13). It never
+    auto-resolves STARTED; reconciliation is a manual operator step
+    (`docs/FINANCIAL-INTEGRITY.md` §8). Durability is bounded by the local
+    disk and the fsync assumptions (power loss not tested).
 15. **Executor token is no longer the executor's only credential.** Since
     Phase 2A the executor verifies the signed authorization and its
     `intent_hash` binding itself (P2A-13). This stops a token holder
@@ -316,7 +336,7 @@ These are stated as limits of Phase 1, not as solved properties.
     holds the signing key and no longer shares the executor's identity, so a
     compromised gateway cannot produce valid authorizations or read the
     wallet (P2B-02..05, P2B-20). It can still request in-policy ones.
-16. **Agent identity override (F5).** `OXDEAI_AGENT_UID` /
+16. **Agent identity override (F5; removed in Phase 2C, ID1-ID4).** Phase 2B: `OXDEAI_AGENT_UID` /
     `OXDEAI_AGENT_GID` are honored by the deployed launcher. Its
     distinctness check compares uids, not gids. In the R4 audit, an agent
     placed in the gateway's group reached the auth and executor sockets;

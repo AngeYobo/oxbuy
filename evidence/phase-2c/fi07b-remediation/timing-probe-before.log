@@ -1,0 +1,3 @@
+TIMING {"issued_at":1793196676,"expiry":1793196679,"ttl":3,"authorized_at":"1793196676.96","submit_start":"1793196679.12","submit_end":"1793196679.37","expired_before_submit":true,"redeploy_s":"2.16","reason":"AUTH_EXPIRED,AUTH_KID_UNKNOWN","decision":"DENY"}
+TIMING {"issued_at":1793196682,"expiry":1793196685,"ttl":3,"authorized_at":"1793196682.89","submit_start":"1793196684.98","submit_end":"1793196685.24","expired_before_submit":false,"redeploy_s":"2.09","reason":"AUTH_EXPIRED,AUTH_KID_UNKNOWN","decision":"DENY"}
+TIMING {"issued_at":1793196688,"expiry":1793196691,"ttl":3,"authorized_at":"1793196688.84","submit_start":"1793196691.13","submit_end":"1793196691.44","expired_before_submit":true,"redeploy_s":"2.30","reason":"AUTH_EXPIRED,AUTH_KID_UNKNOWN","decision":"DENY"}

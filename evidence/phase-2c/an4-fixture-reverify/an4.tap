@@ -1,0 +1,16 @@
+TAP version 13
+# Subtest: AN4 tampering, reordering, truncation at the start, and protocol violations are detected
+ok 1 - AN4 tampering, reordering, truncation at the start, and protocol violations are detected
+  ---
+  duration_ms: 31.422767
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 625.427143

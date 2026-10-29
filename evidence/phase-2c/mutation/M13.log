@@ -1,0 +1,110 @@
+TAP version 13
+# Subtest: CX2e domain ids differ per journal and per executor uid; the audience names the domain
+ok 1 - CX2e domain ids differ per journal and per executor uid; the audience names the domain
+  ---
+  duration_ms: 1.682664
+  type: 'test'
+  ...
+# Subtest: CX2e same signing key, other domain: refused before payment, not consumed; its own domain pays it once
+not ok 2 - CX2e same signing key, other domain: refused before payment, not consumed; its own domain pays it once
+  ---
+  duration_ms: 24.140522
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-2XioVu/tests/executor/execution-domain.test.ts:61:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    200 !== 409
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 409
+  actual: 200
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-2XioVu/tests/executor/execution-domain.test.ts:73:10)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+  ...
+# Subtest: P2A-04 expired authorization: DENY at the gateway, and rejected by the executor directly
+not ok 3 - P2A-04 expired authorization: DENY at the gateway, and rejected by the executor directly
+  ---
+  duration_ms: 9880.788678
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-2XioVu/tests/isolation/process-isolation.test.ts:168:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"outcome":"EXECUTED","receipt":{"settled":true,"reference":"mock-cb6e8c0d8b9a284cc4afdb6fa781cac9","network":"mock-celo","asset":"mock-usdc","amount":"10000","pay_to":"0x1111111111111111111111111111111111111111","response_status":200,"response_body":"{\"mock\":true,\"service_id\":\"weather-api\"}"}}
+    
+    200 !== 409
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 409
+  actual: 200
+  operator: 'strictEqual'
+  stack: |-
+    assertExecutorRefused (file:///tmp/oxdeai-mutant-2XioVu/tests/isolation/process-isolation.test.ts:77:10)
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-2XioVu/tests/isolation/process-isolation.test.ts:183:3)
+    process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+# Subtest: P2A-05 wrong issuer or audience, signed with the real PDP key: rejected by gateway and executor
+not ok 4 - P2A-05 wrong issuer or audience, signed with the real PDP key: rejected by gateway and executor
+  ---
+  duration_ms: 710.122505
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-2XioVu/tests/isolation/process-isolation.test.ts:189:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"outcome":"EXECUTED","receipt":{"settled":true,"reference":"mock-bd1017bc30b57ef4b04d89c3883213a2","network":"mock-celo","asset":"mock-usdc","amount":"10000","pay_to":"0x1111111111111111111111111111111111111111","response_status":200,"response_body":"{\"mock\":true,\"service_id\":\"weather-api\"}"}}
+    
+    200 !== 409
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 409
+  actual: 200
+  operator: 'strictEqual'
+  stack: |-
+    assertExecutorRefused (file:///tmp/oxdeai-mutant-2XioVu/tests/isolation/process-isolation.test.ts:77:10)
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-2XioVu/tests/isolation/process-isolation.test.ts:200:5)
+    process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+  ...
+# Subtest: P2A-13 token holder bypassing the gateway's checks: executor verifies the authorization itself
+not ok 5 - P2A-13 token holder bypassing the gateway's checks: executor verifies the authorization itself
+  ---
+  duration_ms: 1571.128422
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-2XioVu/tests/isolation/process-isolation.test.ts:392:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"outcome":"EXECUTED","receipt":{"settled":true,"reference":"mock-881d0a712be7e035629d5799cc7a8291","network":"mock-celo","asset":"mock-usdc","amount":"10000","pay_to":"0x1111111111111111111111111111111111111111","response_status":200,"response_body":"{\"mock\":true,\"service_id\":\"weather-api\"}"}}
+    
+    200 !== 409
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 409
+  actual: 200
+  operator: 'strictEqual'
+  stack: |-
+    assertExecutorRefused (file:///tmp/oxdeai-mutant-2XioVu/tests/isolation/process-isolation.test.ts:77:10)
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-2XioVu/tests/isolation/process-isolation.test.ts:409:3)
+    process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 1
+# fail 4
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 13600.406498

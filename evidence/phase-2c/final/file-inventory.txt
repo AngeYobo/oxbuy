@@ -1,0 +1,49 @@
+# tracked, modified:
+ docs/ARCHITECTURE.md                       |  62 ++++--
+ docs/CONFORMANCE.md                        |  16 +-
+ docs/DEMO.md                               |  28 ++-
+ docs/ISOLATION.md                          |  28 +++
+ src/adapters/mock-buy/mock-settlement.ts   |  23 +-
+ src/authorization/authorization-service.ts |  99 ++++++++-
+ src/authorization/policy-state-file.ts     | 252 +++++++++++++---------
+ src/authorization/policy-state.ts          |  16 +-
+ src/demo-isolated.ts                       |  34 ++-
+ src/executor/executor.ts                   |  88 +++++---
+ src/executor/payment-journal.ts            | 333 +++++++++++++++++------------
+ src/isolation/auth-main.ts                 | 111 ++++++++--
+ src/isolation/config.ts                    |  42 +++-
+ src/isolation/executor-main.ts             |  73 ++++++-
+ src/isolation/identity.ts                  |  97 +++++++--
+ src/isolation/journal-cli.ts               |  19 +-
+ src/isolation/launcher.ts                  | 120 +++++++++--
+ src/isolation/policy-cli.ts                |  16 +-
+ src/isolation/policy-state-admin.ts        | 318 +++++++++++++++++++++++----
+ tests/executor/payment-journal.test.ts     |  26 ++-
+ tests/isolation/policy-state.test.ts       |  60 ++++--
+ tests/isolation/source-integrity.test.ts   |  18 +-
+ tests/isolation/trusted-artifact.ts        |  25 ++-
+ 23 files changed, 1442 insertions(+), 462 deletions(-)
+# untracked:
+?? .agents/skills/loops-agents-on-open-rails/SKILL.md
+?? .claude/skills/loops-agents-on-open-rails/SKILL.md
+?? AGENTS.md
+?? docs/FINANCIAL-INTEGRITY.md
+?? src/authorization/policy-anchor.ts
+?? src/authorization/reservations.ts
+?? src/durable/durable-file.ts
+?? src/durable/exclusive-lock.ts
+?? src/executor/execution-domain.ts
+?? src/executor/outcome-report.ts
+?? src/executor/outcome-reporter.ts
+?? src/isolation/executor-cli.ts
+?? src/isolation/executor-state-admin.ts
+?? src/isolation/settle-channel.ts
+?? tests/authorization/policy-anchor.test.ts
+?? tests/authorization/reservations.test.ts
+?? tests/executor/execution-domain.test.ts
+?? tests/executor/outcome-report.test.ts
+?? tests/isolation/financial-integrity.test.ts
+?? tests/isolation/identity-validation.test.ts
+?? tests/isolation/settle-probe.ts
+# untracked evidence/phase-2c files:
+46

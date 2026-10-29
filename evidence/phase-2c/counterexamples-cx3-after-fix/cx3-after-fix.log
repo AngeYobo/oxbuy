@@ -1,0 +1,15 @@
+file:///workspaces/oxdeai-celo-poc/src/authorization/policy-anchor.ts:201
+        throw new AnchorError(`POLICY_ANCHOR_CORRUPT:PREPARE ${e.seq} for version ${e.version}, expected ${head.version + 1}`);
+              ^
+
+AnchorError: POLICY_ANCHOR_CORRUPT:PREPARE 8 for version 2, expected 4
+    at parseAnchor (file:///workspaces/oxdeai-celo-poc/src/authorization/policy-anchor.ts:201:15)
+    at add (file:///workspaces/oxdeai-celo-poc/evidence/phase-2c/counterexamples-cx3/reproduce.ts:6:65)
+    at file:///workspaces/oxdeai-celo-poc/evidence/phase-2c/counterexamples-cx3/reproduce.ts:11:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  code: 'POLICY_ANCHOR_CORRUPT:PREPARE 8 for version 2, expected 4'
+}
+
+Node.js v24.21.0

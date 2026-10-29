@@ -7,6 +7,7 @@
  * treats both a throw and a CAS failure as DENY.
  */
 import type { State } from "@oxdeai/core";
+import type { Reservations } from "./reservations.ts";
 
 const REQUIRED_ALLOWLISTS = ["action_types", "assets", "targets"] as const;
 
@@ -28,28 +29,41 @@ export function assertRequiredAllowlists(state: unknown): void {
   }
 }
 
-export type VersionedPolicyState = { readonly state: State; readonly version: number };
+export type VersionedPolicyState = {
+  readonly state: State;
+  readonly version: number;
+  readonly reservations: Reservations;
+  /** Legacy restore (Phase 2D): no authorization is issued before this time (unix seconds). */
+  readonly quarantine_until?: number;
+};
 
 export interface PolicyStateStore {
   load(): Promise<VersionedPolicyState>;
-  commit(next: State, expectedVersion: number): Promise<boolean>;
+  /**
+   * Compare-and-set. `reservations`, when given, replaces the reservation
+   * table in the same atomic write as `next` (Phase 2C: a budget charge and
+   * its reservation, or a release and its transition, are never separated).
+   */
+  commit(next: State, expectedVersion: number, reservations?: Reservations): Promise<boolean>;
 }
 
 /** In-memory store. `setAvailable(false)` simulates an unreachable backend. */
 export function createInMemoryPolicyStateStore(initial: State | undefined) {
   let current: State | undefined = initial === undefined ? undefined : structuredClone(initial);
   let version = 0;
+  let reservations: Reservations = {};
   let available = true;
   const store: PolicyStateStore & { setAvailable(value: boolean): void; clear(): void } = {
     async load() {
       if (!available) throw new Error("POLICY_STATE_UNAVAILABLE");
       if (current === undefined) throw new Error("POLICY_STATE_MISSING");
-      return { state: structuredClone(current), version };
+      return { state: structuredClone(current), version, reservations };
     },
-    async commit(next, expectedVersion) {
+    async commit(next, expectedVersion, nextReservations) {
       if (!available) throw new Error("POLICY_STATE_UNAVAILABLE");
       if (expectedVersion !== version) return false;
       current = structuredClone(next);
+      if (nextReservations !== undefined) reservations = structuredClone(nextReservations);
       version += 1;
       return true;
     },

@@ -1,0 +1,36 @@
+# 2026-10-28T15:21:32Z python3 -I evidence/phase-2c/final/verify-docs.py (pre-commit re-run on corrected docs)
+PASS  final suite 184/184  {'tests': 184, 'pass': 184, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}
+PASS  Phase 2C groups 10/7/5/4/8/6/13 = 53  {'AN': 10, 'RS': 7, 'OR': 5, 'ID': 4, 'CX1': 8, 'CX2': 6, 'FI': 13}
+PASS  FI-07b alone x3, typecheck, suite exit 0  fi07b-alone-run1 exit=0; fi07b-alone-run2 exit=0; fi07b-alone-run3 exit=0; typecheck exit=0; full-suite exit=0; 
+PASS  FI-07b alone run 1 1/1  {'tests': 1, 'pass': 1, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}
+PASS  FI-07b alone run 2 1/1  {'tests': 1, 'pass': 1, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}
+PASS  FI-07b alone run 3 1/1  {'tests': 1, 'pass': 1, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}
+PASS  superseded final/run1-test-results.tap 183/184, FI-07b failed  {'tests': 184, 'pass': 183, 'fail': 1, 'cancelled': 0, 'skipped': 0, 'todo': 0} ['FI-07b']
+PASS  superseded final/test-results.tap 183/184, FI-07b failed  {'tests': 184, 'pass': 183, 'fail': 1, 'cancelled': 0, 'skipped': 0, 'todo': 0} ['FI-07b']
+PASS  an4-fixture-reverify 171/171  {'tests': 171, 'pass': 171, 'fail': 0, 'cancelled': 0, 'skipped': 0, 'todo': 0}
+PASS  mutation run 1 baseline PASS  54 tests
+PASS  mutation run 2 baseline PASS  9 tests
+PASS  mutation run 3 baseline PASS  4 tests
+PASS  M01-M13 present  ['M01', 'M02', 'M03', 'M04', 'M05', 'M06', 'M07', 'M08', 'M09', 'M10', 'M11', 'M12', 'M13']
+PASS  M01-M13 all KILLED (latest run)  {}
+PASS  M07 killed in run 3, 4 failing
+PASS  M13 killed in run 2, 4 failing
+PASS  history: M07 run1 SURVIVED w/ 4 not-ok, M13 run1 SURVIVED
+PASS  demo ALLOW, ALLOW, DENY
+PASS  demo run3 BUDGET_EXCEEDED
+PASS  demo ledger 1,2,2
+PASS  demo charge 10000,20000,20000
+PASS  demo unlisted ALLOWLIST_TARGET, EACCES x2
+PASS  verify: version 4, matches, append-only
+PASS  BLOCKED case
+PASS  cited evidence paths exist
+PASS  no readiness/approval claim in CONFORMANCE Phase 2C  []
+PASS  no readiness/approval claim in MANIFEST.md  []
+PASS  no readiness/approval claim in RECOVERY.md  []
+PASS  no readiness/approval claim in mutation/README.md  []
+PASS  no readiness/approval claim in demo/README.md  []
+PASS  no readiness/approval claim in fi07b-remediation/README.md  []
+PASS  no readiness/approval claim in an4-fixture-reverify/README.md  []
+PASS  no readiness/approval claim in adversarial/README.md  []
+RESULT: PASS
+exit=0

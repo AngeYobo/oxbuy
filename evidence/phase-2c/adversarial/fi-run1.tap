@@ -1,0 +1,99 @@
+TAP version 13
+# Subtest: FI-02 payment rejected before execution (quoteDrift): no payment; released by its own domain; the authorization can never pay
+ok 1 - FI-02 payment rejected before execution (quoteDrift): no payment; released by its own domain; the authorization can never pay
+  ---
+  duration_ms: 4758.428994
+  type: 'test'
+  ...
+# Subtest: FI-02 payment rejected before execution (refuseBeforeSigning): no payment; released by its own domain; the authorization can never pay
+ok 2 - FI-02 payment rejected before execution (refuseBeforeSigning): no payment; released by its own domain; the authorization can never pay
+  ---
+  duration_ms: 4570.96498
+  type: 'test'
+  ...
+# Subtest: FI-03 crash after the reservation is consumed, before the intent record (crashAfterAuthRecord): no payment; released as NOT_STARTED after restart; never payable
+ok 3 - FI-03 crash after the reservation is consumed, before the intent record (crashAfterAuthRecord): no payment; released as NOT_STARTED after restart; never payable
+  ---
+  duration_ms: 4305.306355
+  type: 'test'
+  ...
+# Subtest: FI-04/08 crash after the payment started (crashBeforePay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it
+ok 4 - FI-04/08 crash after the payment started (crashBeforePay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it
+  ---
+  duration_ms: 9953.207784
+  type: 'test'
+  ...
+# Subtest: FI-04/08 crash after the payment started (crashAfterPay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it
+ok 5 - FI-04/08 crash after the payment started (crashAfterPay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it
+  ---
+  duration_ms: 9390.072652
+  type: 'test'
+  ...
+# Subtest: FI-05a duplicate result delivery: executor killed after the auth service applied SETTLED, before its ack; the redelivery is ALREADY_APPLIED and nothing moves twice
+ok 6 - FI-05a duplicate result delivery: executor killed after the auth service applied SETTLED, before its ack; the redelivery is ALREADY_APPLIED and nothing moves twice
+  ---
+  duration_ms: 4012.154186
+  type: 'test'
+  ...
+# Subtest: FI-05b duplicate result delivery: auth service killed after committing a report, before answering; redelivery and forged repeats change nothing
+ok 7 - FI-05b duplicate result delivery: auth service killed after committing a report, before answering; redelivery and forged repeats change nothing
+  ---
+  duration_ms: 4240.251781
+  type: 'test'
+  ...
+# Subtest: FI-07 restart with a pending reservation: the whole deployment is replaced; the reservation stays charged and its authorization pays exactly once
+not ok 8 - FI-07 restart with a pending reservation: the whole deployment is replaced; the reservation stays charged and its authorization pays exactly once
+  ---
+  duration_ms: 5088.523735
+  type: 'test'
+  location: '/workspaces/oxdeai-celo-poc/tests/isolation/financial-integrity.test.ts:564:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    'DENY' !== 'ALLOW'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'ALLOW'
+  actual: 'DENY'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///workspaces/oxdeai-celo-poc/tests/isolation/financial-integrity.test.ts:574:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+  ...
+# Subtest: FI-09 journal corruption and truncation: damaged structure refuses to start; damaged records are never released, never re-paid
+ok 9 - FI-09 journal corruption and truncation: damaged structure refuses to start; damaged records are never released, never re-paid
+  ---
+  duration_ms: 13715.10794
+  type: 'test'
+  ...
+# Subtest: FI-10 missing journal: the executor refuses to start (exit 78), never recreates it, and no purchase pays
+ok 10 - FI-10 missing journal: the executor refuses to start (exit 78), never recreates it, and no purchase pays
+  ---
+  duration_ms: 4747.113959
+  type: 'test'
+  ...
+# Subtest: FI-12/13 simultaneous executor startup: exactly one journal writer; the loser exits 75 before serving; a SIGKILLed holder's lock is released
+ok 11 - FI-12/13 simultaneous executor startup: exactly one journal writer; the loser exits 75 before serving; a SIGKILLed holder's lock is released
+  ---
+  duration_ms: 10439.522393
+  type: 'test'
+  ...
+# Subtest: FI-15 the agent identity cannot create, modify, or delete any financial state (policy state, anchor, journal, ledger, locks)
+ok 12 - FI-15 the agent identity cannot create, modify, or delete any financial state (policy state, anchor, journal, ledger, locks)
+  ---
+  duration_ms: 4636.192929
+  type: 'test'
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 11
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 81533.61361

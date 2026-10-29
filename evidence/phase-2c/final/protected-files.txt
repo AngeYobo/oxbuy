@@ -1,0 +1,9 @@
+# protected files (must be unchanged / untracked, never staged)
+?? .agents/
+?? .claude/
+?? AGENTS.md
+0f14f8d1b328d5092c6db7dffc181b2e03425af22c56f51865172f800907756e  AGENTS.md
+b8b0534d7a64cf4b0defadcf5fcd7be07b6dba94069aa08249fbbaf643f618f5  LICENSE
+25b51064eae7a5ae9fb247b7ede95aa15a5bae6f4a73521bd6800dffa5d6c1b7  .claude/skills/loops-agents-on-open-rails/SKILL.md
+25b51064eae7a5ae9fb247b7ede95aa15a5bae6f4a73521bd6800dffa5d6c1b7  .agents/skills/loops-agents-on-open-rails/SKILL.md
+# staged:

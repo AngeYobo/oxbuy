@@ -22,7 +22,15 @@
  * Replay: the gateway consumes `auth_id` in its replay store before calling
  * the executor; the executor then consumes it again, durably, in the payment
  * journal together with the intent reservation. A first-time request passes
- * both; a resubmission is stopped by whichever sees it second.
+ * both; a resubmission is stopped by whichever sees it second. Neither is the
+ * authority (Phase 2D): before `pay` the executor must obtain a durably
+ * committed execution claim from the authorization service for this attempt
+ * (src/executor/execution-authority.ts). The service grants at most one claim
+ * per authorization, ever, on its own clock (`now < expiry`), so a restarted
+ * gateway or a rolled-back journal cannot make an authorization payable again.
+ * A pre-execution rejection of an authentic authorization is VOIDed at the
+ * service synchronously; if the VOID is not acknowledged, the reservation
+ * stays charged until it expires there.
  *
  * Every response states one of three outcomes:
  *   NOT_EXECUTED     nothing was signed or submitted;
@@ -32,10 +40,12 @@
  * A journal reservation (STARTED) is written before `pay` is invoked, and the
  * same intent is never handed to `pay` twice.
  */
+import { randomBytes } from "node:crypto";
 import { verifyAuthorization, type AuthorizationAuthority, type AuthorizationV1, type KeySet } from "@oxdeai/core";
 import { protectUpstreamExecution } from "@oxdeai/guard";
 import { hashGatewayAction, validatePurchaseRequest } from "../authorization/intent.ts";
 import type { PurchaseRequest } from "../agent/purchase-request.ts";
+import type { ExecutionAuthority } from "./execution-authority.ts";
 import { PaymentRefusedError, type PaymentAdapter, type PaymentReceipt, type QuoteRequest } from "./payment-adapter.ts";
 import type { PaymentJournal } from "./payment-journal.ts";
 
@@ -60,6 +70,8 @@ export type ExecutorOptions = {
   readonly adapter: PaymentAdapter;
   readonly verification: ExecutorVerification;
   readonly journal: PaymentJournal;
+  /** The authorization service as the execution authority (claim before `pay`, VOID on rejection). */
+  readonly authority: ExecutionAuthority;
 };
 
 const ATOMIC_AMOUNT = /^(0|[1-9][0-9]{0,30})$/;
@@ -104,11 +116,19 @@ function receiptViolation(receipt: unknown, request: PurchaseRequest): string | 
 export function createPaymentExecutor(options: ExecutorOptions) {
   const { journal, verification: v } = options;
 
+  /** Intents whose `pay` is running in this process right now (outcome reports: EXECUTING, not UNCERTAIN). */
+  const inFlight = new Set<string>();
+
   async function execute(body: unknown): Promise<ExecutorOutcome> {
     // Pre-payment checks: any failure here means nothing was signed.
     let intentHash: string;
     let authId: string;
     let request: PurchaseRequest;
+    // Set once the authorization is proven authentic, unexpired, and bound to
+    // this action. From then on a refusal consumes the auth_id durably
+    // (REJECTED_BEFORE_EXECUTION) so its budget reservation can be released
+    // safely: a consumed auth_id can never be used to pay (Phase 2C; F3).
+    let authentic = false;
     try {
       const { action, authorization } = parseEnvelope(body);
       intentHash = hashGatewayAction(action);
@@ -126,6 +146,7 @@ export function createPaymentExecutor(options: ExecutorOptions) {
       if (authorization.intent_hash !== intentHash) throw new Error("EXECUTOR_INTENT_HASH_MISMATCH");
       authId = authorization.auth_id;
       request = validatePurchaseRequest((action as Record<string, unknown>).request);
+      authentic = true;
       const quote = await options.adapter.quote(request);
       const u = new URL(request.url);
       if (quote.network !== request.network) throw new Error("EXECUTOR_QUOTE_NETWORK_MISMATCH");
@@ -134,47 +155,98 @@ export function createPaymentExecutor(options: ExecutorOptions) {
       if (quote.resource !== `${u.origin}${u.pathname}`) throw new Error("EXECUTOR_QUOTE_RESOURCE_MISMATCH");
       if (BigInt(quote.amount) > BigInt(request.max_amount)) throw new Error("EXECUTOR_QUOTE_EXCEEDS_AUTHORIZED_MAX");
     } catch (err) {
+      if (!authentic) return { outcome: "NOT_EXECUTED", error: message(err) };
+      try {
+        const rec = journal.consume({ auth_id: authId!, intent_hash: intentHash!, disposition: "REJECTED_BEFORE_EXECUTION", detail: message(err) });
+        // Already consumed earlier (a replay): report what the journal holds, never a new rejection.
+        if (rec.disposition !== "REJECTED_BEFORE_EXECUTION") return { outcome: "NOT_EXECUTED", error: "EXECUTOR_AUTH_REPLAY" };
+      } catch (storageErr) {
+        return { outcome: "NOT_EXECUTED", error: `${message(err)};EXECUTOR_JOURNAL_UNAVAILABLE:${message(storageErr)}` };
+      }
+      // Burn it at the authority, synchronously. Unacknowledged: it stays charged until it expires there.
+      await options.authority.void({ auth_id: authId!, intent_hash: intentHash!, reason: "REJECTED_BEFORE_EXECUTION" }).catch(() => undefined);
       return { outcome: "NOT_EXECUTED", error: message(err) };
     }
 
     let reservation;
+    inFlight.add(intentHash);
     try {
-      reservation = journal.reserve({ intent_hash: intentHash, auth_id: authId, request });
-    } catch (err) {
-      return { outcome: "NOT_EXECUTED", error: `EXECUTOR_JOURNAL_UNAVAILABLE:${message(err)}` };
-    }
-    if (!reservation.ok) {
-      if (reservation.reason === "AUTH_REPLAY") return { outcome: "NOT_EXECUTED", error: "EXECUTOR_AUTH_REPLAY" };
-      // This request is never paid. If the earlier attempt's outcome is not
-      // definitive, the intent's payment status is unknown, not "not executed".
-      const prior = reservation.prior;
-      if (prior === "STARTED" || prior === "UNKNOWN") {
-        return { outcome: "PAYMENT_UNKNOWN", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", prior_state: prior };
-      }
-      return { outcome: "NOT_EXECUTED", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", prior_state: prior };
+      return await reserveAndPay();
+    } finally {
+      inFlight.delete(intentHash);
     }
 
-    let receipt: unknown;
-    try {
-      receipt = await options.adapter.pay({ intent_hash: intentHash, request });
-    } catch (err) {
-      if (err instanceof PaymentRefusedError) {
-        return finish(intentHash, { outcome: "NOT_EXECUTED", error: err.message }, "REFUSED_BEFORE_SIGNING", err.message);
+    async function reserveAndPay(): Promise<ExecutorOutcome> {
+      // One claim id per attempt, journaled before the claim is requested.
+      const claimId = randomBytes(16).toString("hex");
+      try {
+        reservation = journal.reserve({ intent_hash: intentHash, auth_id: authId, request, claim_id: claimId });
+      } catch (err) {
+        return { outcome: "NOT_EXECUTED", error: `EXECUTOR_JOURNAL_UNAVAILABLE:${message(err)}` };
       }
-      return finish(
-        intentHash,
-        { outcome: "PAYMENT_UNKNOWN", error: `EXECUTOR_PAYMENT_OUTCOME_UNKNOWN:${message(err)}` },
-        "UNKNOWN",
-        message(err),
-      );
-    }
+      if (!reservation.ok) {
+        if (reservation.reason === "AUTH_REPLAY") return { outcome: "NOT_EXECUTED", error: "EXECUTOR_AUTH_REPLAY" };
+        // This request is never paid. If the earlier attempt's outcome is not
+        // definitive, the intent's payment status is unknown, not "not executed".
+        const prior = reservation.prior;
+        if (prior === "STARTED" || prior === "UNKNOWN") {
+          return { outcome: "PAYMENT_UNKNOWN", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", prior_state: prior };
+        }
+        return { outcome: "NOT_EXECUTED", error: "EXECUTOR_DUPLICATE_PAYMENT_ATTEMPT", prior_state: prior };
+      }
 
-    // Detects a bad settlement after the fact; it cannot undo it.
-    const violation = receiptViolation(receipt, request);
-    if (violation !== null) {
-      return finish(intentHash, { outcome: "PAYMENT_UNKNOWN", error: violation, receipt }, "UNKNOWN", violation, receipt);
+      // The irreversible boundary: `pay` only with this attempt's acknowledged, durably committed claim.
+      let claim;
+      try {
+        claim = await options.authority.claim({ auth_id: authId, intent_hash: intentHash, claim_id: claimId });
+      } catch (err) {
+        claim = { ok: false as const, definitive: false, reason: message(err) };
+      }
+      if (!claim.ok) {
+        if (claim.definitive) return refuse(intentHash, "CLAIM_REFUSED", `EXECUTOR_CLAIM_REFUSED:${claim.reason}`);
+        // The claim may have committed. Never pay it: record that first, then try to void it.
+        const out = refuse(intentHash, "CLAIM_ABANDONED", `EXECUTOR_CLAIM_UNAVAILABLE:${claim.reason}`);
+        // This process will never pay this claim, so the VOID is true even if the record failed.
+        await options.authority.void({ auth_id: authId, intent_hash: intentHash, reason: "CLAIM_ABANDONED", claim_id: claimId }).catch(() => undefined);
+        return out;
+      }
+
+      let receipt: unknown;
+      try {
+        receipt = await options.adapter.pay({ intent_hash: intentHash, request, claim_id: claimId });
+      } catch (err) {
+        if (err instanceof PaymentRefusedError) {
+          return finish(intentHash, { outcome: "NOT_EXECUTED", error: err.message }, "REFUSED_BEFORE_SIGNING", err.message);
+        }
+        return finish(
+          intentHash,
+          { outcome: "PAYMENT_UNKNOWN", error: `EXECUTOR_PAYMENT_OUTCOME_UNKNOWN:${message(err)}` },
+          "UNKNOWN",
+          message(err),
+        );
+      }
+
+      // Detects a bad settlement after the fact; it cannot undo it.
+      const violation = receiptViolation(receipt, request);
+      if (violation !== null) {
+        return finish(intentHash, { outcome: "PAYMENT_UNKNOWN", error: violation, receipt }, "UNKNOWN", violation, receipt);
+      }
+      return finish(intentHash, { outcome: "EXECUTED", receipt: receipt as PaymentReceipt }, "SETTLED", undefined, receipt);
     }
-    return finish(intentHash, { outcome: "EXECUTED", receipt: receipt as PaymentReceipt }, "SETTLED", undefined, receipt);
+  }
+
+  /**
+   * Claim not granted: `pay` is never called for this attempt. If the record
+   * cannot be written the journal still says STARTED (reported UNCERTAIN, held);
+   * the response is still NOT_EXECUTED, which is true.
+   */
+  function refuse(intentHash: string, state: "CLAIM_REFUSED" | "CLAIM_ABANDONED", error: string): ExecutorOutcome {
+    try {
+      journal.record(intentHash, state, error);
+      return { outcome: "NOT_EXECUTED", error };
+    } catch (err) {
+      return { outcome: "NOT_EXECUTED", error: `${error};EXECUTOR_JOURNAL_WRITE_FAILED:${message(err)}` };
+    }
   }
 
   /**
@@ -236,6 +308,8 @@ export function createPaymentExecutor(options: ExecutorOptions) {
     },
     /** Operator/test inspection of the payment journal. Never handed to the agent. */
     journal: { get: journal.get, inspect: journal.inspect },
+    /** Intents being paid right now (for outcome reports). */
+    inFlight: (): ReadonlySet<string> => inFlight,
   };
 }
 

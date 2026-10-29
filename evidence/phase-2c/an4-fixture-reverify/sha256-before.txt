@@ -1,0 +1,4 @@
+6949bf5efa3707a99bfc02056960989a733b75eaf30b4313a294ff1adfd5fb25  tests/authorization/policy-anchor.test.ts
+622e017775ba0b0b1f95146932172d034ed7afb696b5a9b64c001f380817a6a7  src/authorization/policy-anchor.ts
+fee0d978134fc24cb5e70b0bdb484969b965fa44b82524efaac9b8be448b7d9a  evidence/phase-2c/counterexamples/reproduce.ts
+d969bb126efeed1630b71c6e3084fb8c55314fa915242b9ed7ed28463f4f1b9c  evidence/phase-2c/counterexamples-cx3/reproduce.ts

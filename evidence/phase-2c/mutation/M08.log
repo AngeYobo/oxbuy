@@ -1,0 +1,85 @@
+TAP version 13
+# Subtest: J1 records survive close and reopen; a reserved intent is never reserved again
+ok 1 - J1 records survive close and reopen; a reserved intent is never reserved again
+  ---
+  duration_ms: 33.668571
+  type: 'test'
+  ...
+# Subtest: J2 an auth_id is consumed durably: reusing it for another intent is AUTH_REPLAY, also after reopen
+not ok 2 - J2 an auth_id is consumed durably: reusing it for another intent is AUTH_REPLAY, also after reopen
+  ---
+  duration_ms: 18.936932
+  type: 'test'
+  location: '/tmp/oxdeai-mutant-vLdEEg/tests/executor/payment-journal.test.ts:59:1'
+  failureType: 'testCodeFailure'
+  error: "EEXIST: file already exists, link '/tmp/oxdeai-journal-test-ogN3dJ/journal/auths/.tmp-77959-c073f6e3581b' -> '/tmp/oxdeai-journal-test-ogN3dJ/journal/auths/f55ff16f66f43360266b95db6f8fec01d76031054306ae4a4b380598f6cfd114'"
+  code: 'EEXIST'
+  stack: |-
+    linkSync (node:fs:1975:11)
+    createDurable (file:///tmp/oxdeai-mutant-vLdEEg/src/durable/durable-file.ts:65:5)
+    Object.reserve (file:///tmp/oxdeai-mutant-vLdEEg/src/executor/payment-journal.ts:371:9)
+    TestContext.<anonymous> (file:///tmp/oxdeai-mutant-vLdEEg/tests/executor/payment-journal.test.ts:65:31)
+    Test.runInAsyncScope (node:async_hooks:227:14)
+    Test.run (node:internal/test_runner/test:1402:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+    Test.postRun (node:internal/test_runner/test:1542:19)
+    Test.run (node:internal/test_runner/test:1467:12)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+# Subtest: J3 single writer: a second open fails while the first holds the lock; released on close
+ok 3 - J3 single writer: a second open fails while the first holds the lock; released on close
+  ---
+  duration_ms: 16.576371
+  type: 'test'
+  ...
+# Subtest: J4 crash recovery: STARTED stays STARTED and is listed for reconciliation; never auto-converted
+ok 4 - J4 crash recovery: STARTED stays STARTED and is listed for reconciliation; never auto-converted
+  ---
+  duration_ms: 24.945209
+  type: 'test'
+  ...
+# Subtest: J5 only STARTED can move to a final state, once
+ok 5 - J5 only STARTED can move to a final state, once
+  ---
+  duration_ms: 22.016404
+  type: 'test'
+  ...
+# Subtest: J6 storage permissions: directories 0700 and files 0600 despite the parent's default ACL
+ok 6 - J6 storage permissions: directories 0700 and files 0600 despite the parent's default ACL
+  ---
+  duration_ms: 15.458902
+  type: 'test'
+  ...
+# Subtest: J7 an unreadable record is reported UNKNOWN, never as absent
+ok 7 - J7 an unreadable record is reported UNKNOWN, never as absent
+  ---
+  duration_ms: 15.659276
+  type: 'test'
+  ...
+# Subtest: J8 operator resolution: only for STARTED/UNKNOWN, once, and the state is kept
+ok 8 - J8 operator resolution: only for STARTED/UNKNOWN, once, and the state is kept
+  ---
+  duration_ms: 35.986086
+  type: 'test'
+  ...
+# Subtest: J9a journal unwritable at reservation: NOT_EXECUTED before pay, no payment
+ok 9 - J9a journal unwritable at reservation: NOT_EXECUTED before pay, no payment
+  ---
+  duration_ms: 32.953383
+  type: 'test'
+  ...
+# Subtest: J9b journal unwritable after settlement: PAYMENT_UNKNOWN, journal still STARTED
+ok 10 - J9b journal unwritable after settlement: PAYMENT_UNKNOWN, journal still STARTED
+  ---
+  duration_ms: 18.460616
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 9
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 490.738591

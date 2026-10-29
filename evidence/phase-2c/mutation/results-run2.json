@@ -1,0 +1,55 @@
+[
+  {
+    "id": "BASELINE",
+    "status": 0,
+    "tests": 9,
+    "pass": 9,
+    "fail": 0,
+    "verdict": "PASS"
+  },
+  {
+    "id": "M07",
+    "protects": "B6 / N1: a failed flock is not ownership (an open descriptor is not a lock)",
+    "files": [
+      "src/durable/exclusive-lock.ts"
+    ],
+    "tests": [
+      "tests/executor/payment-journal.test.ts",
+      "tests/isolation/policy-state.test.ts",
+      "tests/isolation/financial-integrity.test.ts"
+    ],
+    "pattern": "^(J3|R3-F4a|R3-F4b|FI-12)",
+    "ran": null,
+    "fail": null,
+    "failing": [
+      "J3 single writer: a second open fails while the first holds the lock; released on close",
+      "FI-12/13 simultaneous executor startup: exactly one journal writer; the loser exits 75 before serving; a SIGKILLed holder's lock is released",
+      "R3-F4a two auth processes starting at once: exactly one owns the writer lock",
+      "R3-F4b (2C, N1) an auth process that only has the lock file open never becomes a second writer"
+    ],
+    "timed_out": false,
+    "verdict": "SURVIVED"
+  },
+  {
+    "id": "M13",
+    "protects": "Phase 2B: the executor verifies the signed authorization itself (verdict ignored)",
+    "files": [
+      "src/executor/executor.ts"
+    ],
+    "tests": [
+      "tests/isolation/process-isolation.test.ts",
+      "tests/executor/execution-domain.test.ts"
+    ],
+    "pattern": "^(P2A-04|P2A-05|P2A-13|CX2e)",
+    "ran": 5,
+    "fail": 4,
+    "failing": [
+      "CX2e same signing key, other domain: refused before payment, not consumed; its own domain pays it once",
+      "P2A-04 expired authorization: DENY at the gateway, and rejected by the executor directly",
+      "P2A-05 wrong issuer or audience, signed with the real PDP key: rejected by gateway and executor",
+      "P2A-13 token holder bypassing the gateway's checks: executor verifies the authorization itself"
+    ],
+    "timed_out": false,
+    "verdict": "KILLED"
+  }
+]

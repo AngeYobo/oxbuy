@@ -1,0 +1,335 @@
+TAP version 13
+# Subtest: AN1 a completed chain: head is the latest DONE, nothing pending
+ok 1 - AN1 a completed chain: head is the latest DONE, nothing pending
+  ---
+  duration_ms: 3.752444
+  type: 'test'
+  ...
+# Subtest: AN2 the crash-state table, row by row
+ok 2 - AN2 the crash-state table, row by row
+  ---
+  duration_ms: 7.579216
+  type: 'test'
+  ...
+# Subtest: AN3 aborted versions never become completed (restore) sources
+ok 3 - AN3 aborted versions never become completed (restore) sources
+  ---
+  duration_ms: 0.648128
+  type: 'test'
+  ...
+# Subtest: AN4 tampering, reordering, truncation at the start, and protocol violations are detected
+ok 4 - AN4 tampering, reordering, truncation at the start, and protocol violations are detected
+  ---
+  duration_ms: 4.142664
+  type: 'test'
+  ...
+# Subtest: AN5 a torn final line is tolerated only as the last line, until an ABORT names it
+ok 5 - AN5 a torn final line is tolerated only as the last line, until an ABORT names it
+  ---
+  duration_ms: 2.327699
+  type: 'test'
+  ...
+# Subtest: AN6 CX3: duplicate, stale, skipped, and bypassing PREPAREs are rejected
+ok 6 - AN6 CX3: duplicate, stale, skipped, and bypassing PREPAREs are rejected
+  ---
+  duration_ms: 25.506646
+  type: 'test'
+  ...
+# Subtest: AN7 CX3: malformed DONE and ABORT sequences are rejected
+ok 7 - AN7 CX3: malformed DONE and ABORT sequences are rejected
+  ---
+  duration_ms: 3.158763
+  type: 'test'
+  ...
+# Subtest: AN8 CX3: reconcile enforces the version rule itself, even on a hand-built log
+ok 8 - AN8 CX3: reconcile enforces the version rule itself, even on a hand-built log
+  ---
+  duration_ms: 1.77053
+  type: 'test'
+  ...
+# Subtest: AN9 valid crash recovery after PREPARE: abort, then retry of the same version, then complete
+ok 9 - AN9 valid crash recovery after PREPARE: abort, then retry of the same version, then complete
+  ---
+  duration_ms: 5.39288
+  type: 'test'
+  ...
+# Subtest: AN10 valid operator restoration: RESTORE for exactly head + 1, completed by its exact state
+ok 10 - AN10 valid operator restoration: RESTORE for exactly head + 1, completed by its exact state
+  ---
+  duration_ms: 2.913864
+  type: 'test'
+  ...
+# Subtest: RS1 a new reservation is RESERVED, bound to its domain, and charged its full amount
+ok 11 - RS1 a new reservation is RESERVED, bound to its domain, and charged its full amount
+  ---
+  duration_ms: 4.801175
+  type: 'test'
+  ...
+# Subtest: RS2 allowed transitions and the amount released by each
+ok 12 - RS2 allowed transitions and the amount released by each
+  ---
+  duration_ms: 3.994173
+  type: 'test'
+  ...
+# Subtest: RS3 an uncertain or executing payment is never released except by evidence it did not pay
+ok 13 - RS3 an uncertain or executing payment is never released except by evidence it did not pay
+  ---
+  duration_ms: 0.893261
+  type: 'test'
+  ...
+# Subtest: RS4 duplicates are ALREADY_APPLIED, older news is STALE, contradictions are refused; nothing releases twice
+ok 14 - RS4 duplicates are ALREADY_APPLIED, older news is STALE, contradictions are refused; nothing releases twice
+  ---
+  duration_ms: 2.942244
+  type: 'test'
+  ...
+# Subtest: RS5 binding, amount, and reason are validated before anything changes
+ok 15 - RS5 binding, amount, and reason are validated before anything changes
+  ---
+  duration_ms: 2.364398
+  type: 'test'
+  ...
+# Subtest: RS6 transitions are deterministic and recorded in the history
+ok 16 - RS6 transitions are deterministic and recorded in the history
+  ---
+  duration_ms: 0.302591
+  type: 'test'
+  ...
+# Subtest: RS7 restore freezes every non-final reservation as UNCERTAIN and keeps its charge
+ok 17 - RS7 restore freezes every non-final reservation as UNCERTAIN and keeps its charge
+  ---
+  duration_ms: 0.319358
+  type: 'test'
+  ...
+# Subtest: OR1 a valid report verifies and yields its facts and journal
+ok 18 - OR1 a valid report verifies and yields its facts and journal
+  ---
+  duration_ms: 4.542333
+  type: 'test'
+  ...
+# Subtest: OR2 any change to a signed report, a foreign key, or a bad shape is refused
+ok 19 - OR2 any change to a signed report, a foreign key, or a bad shape is refused
+  ---
+  duration_ms: 6.19639
+  type: 'test'
+  ...
+# Subtest: OR3 derivation: NOT_EXECUTED only when the journal proves `pay` did not (successfully) run
+ok 20 - OR3 derivation: NOT_EXECUTED only when the journal proves `pay` did not (successfully) run
+  ---
+  duration_ms: 0.717811
+  type: 'test'
+  ...
+# Subtest: OR4 one acknowledgement key per outcome and reason
+ok 21 - OR4 one acknowledgement key per outcome and reason
+  ---
+  duration_ms: 0.257329
+  type: 'test'
+  ...
+# Subtest: OR5 settle: the reporting journal must be the current domain and the reservation's domain; duplicates never release twice
+ok 22 - OR5 settle: the reporting journal must be the current domain and the reservation's domain; duplicates never release twice
+  ---
+  duration_ms: 28.61265
+  type: 'test'
+  ...
+# Subtest: J1 records survive close and reopen; a reserved intent is never reserved again
+ok 23 - J1 records survive close and reopen; a reserved intent is never reserved again
+  ---
+  duration_ms: 56.729006
+  type: 'test'
+  ...
+# Subtest: J2 an auth_id is consumed durably: reusing it for another intent is AUTH_REPLAY, also after reopen
+ok 24 - J2 an auth_id is consumed durably: reusing it for another intent is AUTH_REPLAY, also after reopen
+  ---
+  duration_ms: 23.357291
+  type: 'test'
+  ...
+# Subtest: J3 single writer: a second open fails while the first holds the lock; released on close
+ok 25 - J3 single writer: a second open fails while the first holds the lock; released on close
+  ---
+  duration_ms: 22.158419
+  type: 'test'
+  ...
+# Subtest: J4 crash recovery: STARTED stays STARTED and is listed for reconciliation; never auto-converted
+ok 26 - J4 crash recovery: STARTED stays STARTED and is listed for reconciliation; never auto-converted
+  ---
+  duration_ms: 25.890337
+  type: 'test'
+  ...
+# Subtest: J5 only STARTED can move to a final state, once
+ok 27 - J5 only STARTED can move to a final state, once
+  ---
+  duration_ms: 23.782697
+  type: 'test'
+  ...
+# Subtest: J6 storage permissions: directories 0700 and files 0600 despite the parent's default ACL
+ok 28 - J6 storage permissions: directories 0700 and files 0600 despite the parent's default ACL
+  ---
+  duration_ms: 16.167119
+  type: 'test'
+  ...
+# Subtest: J7 an unreadable record is reported UNKNOWN, never as absent
+ok 29 - J7 an unreadable record is reported UNKNOWN, never as absent
+  ---
+  duration_ms: 15.236797
+  type: 'test'
+  ...
+# Subtest: J8 operator resolution: only for STARTED/UNKNOWN, once, and the state is kept
+ok 30 - J8 operator resolution: only for STARTED/UNKNOWN, once, and the state is kept
+  ---
+  duration_ms: 29.047737
+  type: 'test'
+  ...
+# Subtest: J9a journal unwritable at reservation: NOT_EXECUTED before pay, no payment
+ok 31 - J9a journal unwritable at reservation: NOT_EXECUTED before pay, no payment
+  ---
+  duration_ms: 23.511536
+  type: 'test'
+  ...
+# Subtest: J9b journal unwritable after settlement: PAYMENT_UNKNOWN, journal still STARTED
+ok 32 - J9b journal unwritable after settlement: PAYMENT_UNKNOWN, journal still STARTED
+  ---
+  duration_ms: 17.847863
+  type: 'test'
+  ...
+# Subtest: CX1a regression: the state from one commit earlier (after a completed DONE) is refused at startup and while running
+ok 33 - CX1a regression: the state from one commit earlier (after a completed DONE) is refused at startup and while running
+  ---
+  duration_ms: 4480.410219
+  type: 'test'
+  ...
+# Subtest: CX2a regression: a new deployment on another journal never releases a reservation an older executor is still paying
+ok 34 - CX2a regression: a new deployment on another journal never releases a reservation an older executor is still paying
+  ---
+  duration_ms: 14454.677044
+  type: 'test'
+  ...
+# Subtest: CX2b across three journals: an earlier deployment's authorization cannot execute elsewhere and is reconciled only by its own journal
+ok 35 - CX2b across three journals: an earlier deployment's authorization cannot execute elsewhere and is reconciled only by its own journal
+  ---
+  duration_ms: 19701.197888
+  type: 'test'
+  ...
+# Subtest: CX2d forged, foreign-domain, unknown, out-of-binding, and unproven reports never move budget
+ok 36 - CX2d forged, foreign-domain, unknown, out-of-binding, and unproven reports never move budget
+  ---
+  duration_ms: 4788.150782
+  type: 'test'
+  ...
+# Subtest: FI-02 payment rejected before execution (quoteDrift): no payment; released by its own domain; the authorization can never pay
+ok 37 - FI-02 payment rejected before execution (quoteDrift): no payment; released by its own domain; the authorization can never pay
+  ---
+  duration_ms: 6394.772028
+  type: 'test'
+  ...
+# Subtest: FI-02 payment rejected before execution (refuseBeforeSigning): no payment; released by its own domain; the authorization can never pay
+ok 38 - FI-02 payment rejected before execution (refuseBeforeSigning): no payment; released by its own domain; the authorization can never pay
+  ---
+  duration_ms: 5893.957074
+  type: 'test'
+  ...
+# Subtest: FI-04/08 crash after the payment started (crashBeforePay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it
+ok 39 - FI-04/08 crash after the payment started (crashBeforePay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it
+  ---
+  duration_ms: 9839.711969
+  type: 'test'
+  ...
+# Subtest: FI-04/08 crash after the payment started (crashAfterPay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it
+ok 40 - FI-04/08 crash after the payment started (crashAfterPay): UNCERTAIN and fully charged across executor, auth, and deployment restarts; no retry; only an operator resolution moves it
+  ---
+  duration_ms: 13975.710753
+  type: 'test'
+  ...
+# Subtest: FI-09 journal corruption and truncation: damaged structure refuses to start; damaged records are never released, never re-paid
+ok 41 - FI-09 journal corruption and truncation: damaged structure refuses to start; damaged records are never released, never re-paid
+  ---
+  duration_ms: 17182.478635
+  type: 'test'
+  ...
+# Subtest: FI-12/13 simultaneous executor startup: exactly one journal writer; the loser exits 75 before serving; a SIGKILLed holder's lock is released
+ok 42 - FI-12/13 simultaneous executor startup: exactly one journal writer; the loser exits 75 before serving; a SIGKILLed holder's lock is released
+  ---
+  duration_ms: 10369.199868
+  type: 'test'
+  ...
+# Subtest: ID1 the approved configuration (synthetic copy of this deployment) is accepted
+ok 43 - ID1 the approved configuration (synthetic copy of this deployment) is accepted
+  ---
+  duration_ms: 5.074698
+  type: 'test'
+  ...
+# Subtest: ID2 unsafe synthetic configurations are rejected
+ok 44 - ID2 unsafe synthetic configurations are rejected
+  ---
+  duration_ms: 0.599772
+  type: 'test'
+  ...
+# Subtest: ID3 the real accounts pass validation, and the override variables are ignored
+ok 45 - ID3 the real accounts pass validation, and the override variables are ignored
+  ---
+  duration_ms: 12.483535
+  type: 'test'
+  ...
+# Subtest: ID4 process level, override variables set (R4 F5 configuration): the agent is still oxdeai-agent and cannot reach the auth, executor, or settle sockets
+ok 46 - ID4 process level, override variables set (R4 F5 configuration): the agent is still oxdeai-agent and cannot reach the auth, executor, or settle sockets
+  ---
+  duration_ms: 2855.250428
+  type: 'test'
+  ...
+# Subtest: R3-F4a two auth processes starting at once: exactly one owns the writer lock
+ok 47 - R3-F4a two auth processes starting at once: exactly one owns the writer lock
+  ---
+  duration_ms: 4214.258554
+  type: 'test'
+  ...
+# Subtest: R3-F4b (2C, N1) an auth process that only has the lock file open never becomes a second writer
+ok 48 - R3-F4b (2C, N1) an auth process that only has the lock file open never becomes a second writer
+  ---
+  duration_ms: 3224.833011
+  type: 'test'
+  ...
+# Subtest: P2A-13 token holder bypassing the gateway's checks: executor verifies the authorization itself
+ok 49 - P2A-13 token holder bypassing the gateway's checks: executor verifies the authorization itself
+  ---
+  duration_ms: 4545.082824
+  type: 'test'
+  ...
+# Subtest: R-F1a recipient changes between executor quote and pay: refused before signing, DENY, no payment
+ok 50 - R-F1a recipient changes between executor quote and pay: refused before signing, DENY, no payment
+  ---
+  duration_ms: 26.903932
+  type: 'test'
+  ...
+# Subtest: R-F1a network changes between executor quote and pay: refused before signing, DENY, no payment
+ok 51 - R-F1a network changes between executor quote and pay: refused before signing, DENY, no payment
+  ---
+  duration_ms: 4.084978
+  type: 'test'
+  ...
+# Subtest: R-F1a asset changes between executor quote and pay: refused before signing, DENY, no payment
+ok 52 - R-F1a asset changes between executor quote and pay: refused before signing, DENY, no payment
+  ---
+  duration_ms: 5.70594
+  type: 'test'
+  ...
+# Subtest: R-F1a price changes between executor quote and pay: refused before signing, DENY, no payment
+ok 53 - R-F1a price changes between executor quote and pay: refused before signing, DENY, no payment
+  ---
+  duration_ms: 3.704658
+  type: 'test'
+  ...
+1..0
+# Subtest: tests/security/tamper.test.ts
+ok 10 - tests/security/tamper.test.ts
+  ---
+  duration_ms: 246.56758
+  type: 'test'
+  ...
+1..54
+# tests 54
+# suites 0
+# pass 54
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 127857.22053

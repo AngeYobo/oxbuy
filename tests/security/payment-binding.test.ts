@@ -43,7 +43,7 @@ for (const [name, change, detail] of QUOTE_THEN_PAY_CHANGES) {
   });
 }
 
-test("R-F1b pay receives the full authorized binding: exact request and the verified intent_hash", async () => {
+test("R-F1b pay receives the full authorized binding: exact request, the verified intent_hash, and its execution claim", async () => {
   const seen: AuthorizedPayment[] = [];
   const sys = createLocalSystem({
     faults: {
@@ -60,7 +60,10 @@ test("R-F1b pay receives the full authorized binding: exact request and the veri
   const result = await sys.client.purchase(auth);
   assert.equal(result.decision, "ALLOW");
   assert.equal(seen.length, 1);
-  assert.deepEqual(seen[0], { intent_hash: auth.authorization.intent_hash, request: auth.request });
+  // Phase 2D: plus the execution claim committed for this attempt (the one journaled for the intent).
+  const claimId = sys.harness.executor.journal.inspect(auth.authorization.intent_hash)?.claim_id;
+  assert.match(String(claimId), /^[0-9a-f]{32}$/);
+  assert.deepEqual(seen[0], { intent_hash: auth.authorization.intent_hash, request: auth.request, claim_id: claimId });
   assert.equal(result.intent_hash, auth.authorization.intent_hash);
   assert.deepEqual(sys.harness.executor.journal.get(auth.authorization.intent_hash), { state: "SETTLED" });
 });

@@ -1,0 +1,12 @@
+MOCK ONLY: no wallet, no network, no chain.
+
+OK  Authorized payment                   ALLOW executed=true  payments=1 
+OK  Unauthorized service                 DENY  executed=false payments=0 PDP:ALLOWLIST_TARGET
+OK  Unauthorized recipient               DENY  executed=false payments=0 PDP:ALLOWLIST_TARGET
+OK  Amount exceeds policy cap            DENY  executed=false payments=0 PDP:PER_ACTION_CAP_EXCEEDED
+OK  Body modified after authorization    DENY  executed=false payments=0 INTENT_HASH_MISMATCH
+OK  Expired authorization                DENY  executed=false payments=0 AUTH_EXPIRED
+OK  Replayed authorization (2nd use)     DENY  executed=false payments=1 AUTH_REPLAY
+OK  Invalid signature                    DENY  executed=false payments=0 AUTH_SIGNATURE_INVALID
+OK  Policy state unavailable             DENY  executed=false payments=0 PDP:POLICY_STATE_UNAVAILABLE:POLICY_STATE_UNAVAILABLE
+OK  Direct executor call, no token       DENY  executed=false payments=0 EXECUTOR_HTTP_403

@@ -1,0 +1,16 @@
+TAP version 13
+# Subtest: FI-15 the agent and gateway identities cannot create, modify, or delete any financial state (policy state, anchor, journal, ledger, locks)
+ok 1 - FI-15 the agent and gateway identities cannot create, modify, or delete any financial state (policy state, anchor, journal, ledger, locks)
+  ---
+  duration_ms: 4266.21214
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5107.256058

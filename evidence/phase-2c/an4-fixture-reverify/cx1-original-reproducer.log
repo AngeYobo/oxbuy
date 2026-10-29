@@ -1,0 +1,4 @@
+CX1_first: "ALLOW"
+CX1_second: "ALLOW"
+CX1_third_before_rollback: "DENY:BUDGET_EXCEEDED"
+CX1_restart_after_one_step_rollback: "auth exited during startup (code 78): {\"event\":\"refused\",\"role\":\"auth\",\"reason\":\"POLICY_STATE_ROLLBACK:state version 1, anchor head version 2\"}"

@@ -46,6 +46,8 @@ export type QuoteRequest = Pick<PurchaseRequest, "service_id" | "method" | "url"
 export type AuthorizedPayment = {
   readonly intent_hash: string;
   readonly request: PurchaseRequest;
+  /** The execution claim the authorization service committed for this attempt (Phase 2D). */
+  readonly claim_id: string;
 };
 
 /**
