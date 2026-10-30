@@ -31,6 +31,25 @@ export type ExecutorFaults = {
   readonly refuseBeforeSigning?: boolean;
   /** SIGKILL after the auth service acknowledged an outcome report, before the ack is journaled. */
   readonly crashBeforeAck?: boolean;
+  /** x402: SIGKILL once the seller answered a request carrying the signed payment, before the adapter reads it. */
+  readonly crashAfterPaymentSent?: boolean;
+};
+
+/**
+ * x402 v2 / EIP-3009 testnet rail (src/adapters/x402-evm/x402-evm.ts). Absent: the mock rail.
+ * The wallet key file is executor-private (0600, owned by the executor identity) and is read only
+ * inside `pay`, after every pre-signing check. Mainnet networks are refused by the adapter.
+ */
+export type X402PaymentConfig = {
+  readonly kind: "x402-evm";
+  /** CAIP-2 testnet id, e.g. eip155:11142220. */
+  readonly network: string;
+  readonly rpcUrl: string;
+  readonly walletKeyPath: string;
+  readonly approvedRecipients: readonly string[];
+  /** Authorized https origin -> endpoint actually dialed (see X402EvmConfig.endpoints). */
+  readonly endpoints?: Readonly<Record<string, string>>;
+  readonly receiptTimeoutMs?: number;
 };
 
 export type ServiceConfig = {
@@ -73,6 +92,8 @@ export type ExecutorConfig = {
     readonly trustedAuthorizationAuthorities: readonly AuthorizationAuthority[];
   };
   readonly services: readonly ServiceConfig[];
+  /** Payment rail; absent = mock (Phase 1-2D behaviour, unchanged). */
+  readonly payment?: X402PaymentConfig;
   readonly faults?: ExecutorFaults;
 };
 

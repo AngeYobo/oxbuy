@@ -137,6 +137,7 @@ export function createPaymentExecutor(options: ExecutorOptions) {
     let intentHash: string;
     let authId: string;
     let request: PurchaseRequest;
+    let authorizationExpiry: number;
     // Set once the authorization is proven authentic, unexpired, and bound to
     // this action. From then on a refusal consumes the auth_id durably
     // (REJECTED_BEFORE_EXECUTION) so its budget reservation can be released
@@ -158,6 +159,7 @@ export function createPaymentExecutor(options: ExecutorOptions) {
       }
       if (authorization.intent_hash !== intentHash) throw new Error("EXECUTOR_INTENT_HASH_MISMATCH");
       authId = authorization.auth_id;
+      authorizationExpiry = authorization.expiry;
       request = validatePurchaseRequest((action as Record<string, unknown>).request);
       authentic = true;
       const quote = await options.adapter.quote(request);
@@ -227,7 +229,7 @@ export function createPaymentExecutor(options: ExecutorOptions) {
 
       let receipt: unknown;
       try {
-        receipt = await options.adapter.pay({ intent_hash: intentHash, request, claim_id: claimId });
+        receipt = await options.adapter.pay({ intent_hash: intentHash, request, claim_id: claimId, authorization_expiry: authorizationExpiry, persistPaymentBinding: (binding) => journal.bindPayment(intentHash, binding) });
       } catch (err) {
         if (err instanceof PaymentRefusedError) {
           // The claim committed, so the service will never grant another one for this authorization.

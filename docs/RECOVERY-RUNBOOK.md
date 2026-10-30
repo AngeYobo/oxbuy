@@ -193,3 +193,32 @@ no local restore can roll back.
   One exception: when a claim's answer is lost, the executor writes CLAIM_ABANDONED and sends its VOID even
   if that final state's checkpoint append failed. The VOID releases only a claim that this process will
   never pay, so this has no financial effect.
+
+## 10. x402 testnet rail: reconciling an INDETERMINATE payment
+
+With `ExecutorConfig.payment.kind = "x402-evm"`, the settlement evidence is the chain
+(`docs/TESTNET-X402.md` §3.3).
+
+1. Find the transaction. The journal record of the intent (`journal-cli show <intent_hash>`) holds the payer,
+   the nonce and `validBefore` in its detail (and the tx hash when one was returned). The explorer
+   (https://celo-sepolia.blockscout.com) lists the token's `AuthorizationUsed` events for that payer.
+2. Executor stopped, as the executor identity:
+   `node src/isolation/journal-cli.ts <journalDir> resolve-x402 <intent_hash> <tx_hash> <rpcUrl> <walletKeyPath> "<note>"`.
+   It refuses a pending, reverted or unrelated transaction.
+3. Start the executor. The reporter sends `RESOLVED_SETTLED`, and the reservation is confirmed at the settled
+   amount.
+4. No transaction found: do nothing. The reservation stays UNCERTAIN and fully charged. A reverted transaction
+   or a "not settled" answer is not proof: the signed authorization can still settle until `validBefore`.
+
+### 10.1 Order of reporting and resolution (patch 0010, XR-01)
+
+Before 0010, a resolution recorded while the auth service still held the reservation EXECUTING (no UNCERTAIN
+report delivered yet, e.g. the executor never restarted after a crash) was refused forever and the budget stayed
+charged. Since 0010 the service confirms `EXECUTING --RESOLVED_SETTLED--> CONFIRMED` with the same evidence rules
+(claim id, amount <= reservation). The order of `resolve-x402` and the first report no longer matters.
+
+### 10.2 Files that hold signed payments (XR-04)
+
+The journal record and the checkpoint keep the signed EIP-3009 authorization of every x402 payment (R-02). Until
+its `validBefore` (at most the OxDeAI authorization expiry) anyone holding it could submit exactly that transfer
+once. Keep both executor-private, and back up or export them only after `validBefore` has passed.

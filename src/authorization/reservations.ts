@@ -18,6 +18,8 @@
  *   EXECUTING(c) --VOID(c, CLAIM_ABANDONED)------------->   RELEASED
  *   EXECUTING(c) --UNCERTAIN(c)------------------------->   UNCERTAIN held; never released automatically
  *   UNCERTAIN(c) --SETTLED(c, a) | RESOLVED_SETTLED(c, a)-> CONFIRMED charge = a (journal record or MAC-verified ledger evidence)
+ *   EXECUTING(c) --RESOLVED_SETTLED(c, a)--------------->   CONFIRMED charge = a (patch 0010, XR-01: an operator resolution
+ *                                                          recorded before any UNCERTAIN report; same positive evidence)
  *   frozen (legacy restore): never released; a confirmation keeps the full charge
  *
  * Safety (INV): RESERVED is never re-entered and a reservation is created
@@ -194,6 +196,10 @@ function target(from: ReservationState, f: OutcomeFacts): ReservationState | nul
     if (f.outcome === "SETTLED") return "CONFIRMED";
     if (f.outcome === "NOT_EXECUTED") return "RELEASED";
     if (f.outcome === "UNCERTAIN") return "UNCERTAIN";
+    // XR-01: verified settlement evidence resolved by the operator before the UNCERTAIN report reached this
+    // service. Without this transition the reporter (which then only derives RESOLVED_SETTLED) was refused
+    // forever and the reservation stayed EXECUTING and charged.
+    if (f.outcome === "RESOLVED_SETTLED") return "CONFIRMED";
   }
   // A positive settlement record (journal SETTLED, or a MAC-verified resolution) confirms an uncertain claim.
   if (from === "UNCERTAIN" && (f.outcome === "RESOLVED_SETTLED" || f.outcome === "SETTLED")) return "CONFIRMED";

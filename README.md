@@ -1,125 +1,130 @@
-# OxBuy
+# OxDeAI x402 Authorization Gateway
 
-**AI agents that buy. You set the rules.**
+**Pre-execution authorization for AI-agent payments on Celo.**
 
-OxBuy is an AI purchasing agent that discovers and buys paid API services through x402 on Celo, with deterministic authorization powered by [OxDeAI](https://github.com/oxdeai/oxdeai).
+A proof-of-concept project exploring how OxDeAI can enforce deterministic authorization decisions before AI agents execute paid API requests through x402 and Celo.
 
-**Website:** oxbuy.ai (planned)
-**Hackathon:** [Agents on Open Rails](https://www.loops.house/agents-on-open-rails/)
-**Track:** Build with buy
-**Status:** Proof of Concept
+**Hackathon:** Agents on Open Rails
+**Target track:** Build with buy
+**Status:** Proof of Concept (Integration feasibility under evaluation)
 
-## Why OxBuy?
+## The Problem
 
-AI agents can access wallets and pay for services, but having payment credentials does not mean having permission to spend.
+AI agents can increasingly discover services, call paid APIs, and initiate payments autonomously.
 
-OxBuy is designed to let users define approved providers, spending limits and payment conditions before an agent can execute purchases.
+However, access to a wallet or valid payment credentials does not necessarily mean that an agent is authorized to perform a specific transaction.
 
-**The agent chooses what to buy. OxDeAI verifies whether it is authorized.**
+A spending limit alone does not establish whether a particular payment is permitted under the current policy, context, and execution state.
 
-## Use Case
+## Our Approach
 
-A small business asks OxBuy to monitor its brand and competitors.
+OxDeAI provides a deterministic pre-execution authorization layer designed to evaluate specific agent actions before they reach protected execution systems.
 
-The agent discovers paid information services, purchases relevant data within an approved budget and produces a concise intelligence brief.
+This PoC aims to integrate that authorization layer with Celo's agentic payment ecosystem.
 
-Example:
+The proposed flow is:
 
-> Research my competitors, use approved providers only, and spend no more than 1 USDC today.
+1. An AI agent requests a paid API service.
+2. OxDeAI evaluates the proposed action against authorization policy and relevant state.
+3. A Policy Enforcement Point (PEP) verifies the authorization before payment execution.
+4. An isolated payment executor initiates the approved x402 payment through the supported integration.
+5. Unauthorized, expired, replayed, or modified requests are rejected.
 
-This is the target product workflow. Live third-party x402 purchasing remains under development.
+The integration must prevent agents from bypassing the enforcement point and accessing payment credentials directly.
 
-## How It Works
+## Proposed Architecture
 
 ```text
-User Task + Budget
-        |
-        v
-     OxBuy Agent
-        |
-        v
-  Purchase Request
-        |
-        v
-  OxDeAI Authorization
-        |
-   +----+----+
-   |         |
-  DENY      ALLOW
-   |         |
- No Payment  v
-       Protected Executor
-             |
-          x402 / buy
-             |
-         Celo Network
-             |
-        Paid API Result
+AI Agent
+   |
+   v
+Payment Request
+   |
+   v
+OxDeAI Authorization Layer
+   |
+   +-- Policy Decision Point (PDP)
+   |
+   +-- Signed Authorization
+   |
+   v
+Policy Enforcement Point (PEP)
+   |
+   +-- DENY --> No payment
+   |
+   +-- ALLOW --> Controlled Payment Executor
+                         |
+                         v
+                    buy / x402
+                         |
+                         v
+                    Celo Network
 ```
 
-OxDeAI evaluates the payment authorization before execution. The protected executor must verify that the actual transaction matches the authorized action.
+## Security Objectives
 
-## Security
+The PoC will evaluate:
 
-The integration is designed to enforce:
+- Deterministic authorization before execution
+- Binding authorization to the specific payment action
+- Verification of service, recipient, amount, and relevant policy constraints
+- Expiration and replay protection
+- Fail-closed behavior when authorization cannot be verified
+- Isolation of wallet credentials from the AI agent
+- Prevention of direct payment paths that bypass the PEP
 
-- Exact payment authorization and provider restrictions
-- Spending limits and authorization expiration
-- Replay protection and fail-closed behavior
-- Payment credential isolation
-- Safe handling of uncertain settlement outcomes
+## Demonstration Goals
 
-Security remediation and independent verification remain in progress. These objectives are not all independently validated.
+The intended demonstration includes:
 
-## Celo Integration
+| Scenario | Expected result |
+| --- | --- |
+| Authorized payment | ALLOW, followed by payment execution |
+| Unauthorized payment | DENY, no payment |
+| Payment exceeds policy limit | DENY |
+| Expired authorization | DENY |
+| Replayed authorization | DENY |
+| Modified payment parameters | DENY |
+| Attempted PEP bypass | Blocked by the execution architecture |
 
-OxBuy uses x402 for paid API access and ERC-8004 for agent identity.
-
-**ERC-8004 registration completed on Celo Sepolia:**
-
-| Field | Value |
-|---|---|
-| Agent ID | `890` |
-| Network | Celo Sepolia |
-| Wallet | `0xAE1C830076fE626610A9c24C92180bcF97c9e924` |
-| Attribution | `celo_9d43bf3ecad7` |
-
-[View registration transaction](https://celo-sepolia.blockscout.com/tx/0x5038b66feabaf883abb07cb57404395de579b6745e9ac0e5f2e41e040973a2e2)
-
-The registration was completed under the test identity **OxDeAI Guarded Buyer (PoC)**. This does not yet demonstrate an end-to-end x402 purchase.
-
-## Project Status
-
-| Milestone | Status |
-|---|---|
-| Celo Sepolia integration | Completed |
-| ERC-8004 testnet registration | Completed |
-| OxDeAI payment authorization PoC | Implemented, under review |
-| Independent security verification | Pending |
-| Live x402 service purchase | Pending |
-| User-facing intelligence brief | Planned |
-| Mainnet demonstration | Pending |
+These are target acceptance criteria, not claims of completed implementation.
 
 ## Technology
 
-TypeScript, Node.js, OxDeAI, Celo, x402, ERC-8004, ERC-8021 and viem.
+- **OxDeAI:** Deterministic authorization protocol
+- **Celo:** Blockchain payment network
+- **x402:** HTTP payment protocol
+- **buy:** Target integration for paid API services
+- **TypeScript / Node.js:** Proposed implementation environment
 
-## Next Milestones
+## Project Status
 
-1. Integrate a verified paid service from the buy ecosystem.
-2. Complete critical authorization and recovery fixes.
-3. Demonstrate an authorized purchase and a blocked purchase.
-4. Deliver a useful result to a real user.
-5. Prepare a controlled mainnet demonstration.
+This repository is a hackathon-specific integration project.
 
-## Built with OxDeAI
+The first milestone is to verify whether the payment execution path can be reliably gated by OxDeAI before signing or settlement.
 
-OxBuy is an application built on top of OxDeAI's deterministic authorization protocol.
+Implementation and mainnet demonstrations will follow only if that enforcement boundary is technically feasible.
 
-**OxBuy handles purchasing. OxDeAI enforces authorization.**
+Testnet integration (candidate for independent review): real x402 v2 / EIP-3009 payments on **Celo Sepolia**,
+bound to the OxDeAI authorization before signing. Verified offline against a simulator with real EIP-3009
+semantics; the live run is `npm run testnet:live` (see [docs/TESTNET-X402.md](docs/TESTNET-X402.md)). No
+mainnet transaction is authorized. Open financial-integrity risk:
+[docs/F-SIBLING-ASSESSMENT.md](docs/F-SIBLING-ASSESSMENT.md).
 
-Protocol: https://github.com/oxdeai/oxdeai
+## Relationship to OxDeAI
+
+This project is an independent integration PoC.
+
+The OxDeAI core protocol is maintained separately:
+
+<https://github.com/oxdeai/oxdeai/>
+
+## Hackathon
+
+Agents on Open Rails, Celo ecosystem
+
+<https://www.loops.house/agents-on-open-rails/>
 
 ## License
 
-MIT, subject to the included LICENSE file.
+MIT, subject to the repository's included LICENSE file.

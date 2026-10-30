@@ -98,6 +98,16 @@ switch (command) {
     break;
   }
 
+  case "authorize-request": {
+    // x402 testnet profile: authorize an explicit request (the probe's own services are mock ones).
+    const [sock, json] = args;
+    const client = createRemoteGatewayClient(sock!);
+    const request = JSON.parse(json!);
+    const auth = await client.authorize(request);
+    out = auth.decision === "ALLOW" ? { request, intent_ref: auth.intent_ref, authorization: auth.authorization } : auth;
+    break;
+  }
+
   case "authorize-only": {
     const a = await authorized(args[0]!);
     out = { request: a.request, intent_ref: a.intent_ref, authorization: a.authorization };

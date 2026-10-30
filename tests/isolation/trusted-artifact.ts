@@ -31,7 +31,7 @@ export function newStore(): string {
  * operator (explicit first-time initialization: a new budget is a deliberate
  * fixture step, never a side effect of launching). Removed by `removeStateRoot`.
  */
-export function freshPolicyState(opts: { budget?: string; ttlSeconds?: number } = {}): string {
+export function freshPolicyState(opts: { budget?: string; ttlSeconds?: number; state?: import("@oxdeai/core").State } = {}): string {
   const parent = mkdtempSync(join(tmpdir(), "oxdeai-state-"));
   chmodSync(parent, 0o711);
   const root = join(parent, "policy");

@@ -108,6 +108,11 @@ export type LaunchOptions = {
   readonly runtimeParent?: string;
   /** Working directory for programs run as a domain identity (must be readable by it). Default: process.cwd(). */
   readonly agentCwd?: string;
+  /**
+   * x402 testnet rail for the executor (absent: mock). `walletKeyHex` is a TESTNET key; it is
+   * installed as an executor-private 0600 file and never written to the config, argv, or logs.
+   */
+  readonly payment?: Omit<import("./config.ts").X402PaymentConfig, "walletKeyPath"> & { readonly walletKeyHex: string };
 };
 
 export type RoleRun = { code: number | null; stdout: string; stderr: string; result: unknown };
@@ -283,6 +288,14 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     }
   }
 
+  // x402 testnet rail: the key goes to an executor-private file, the config names only its path.
+  let x402: import("./config.ts").X402PaymentConfig | undefined;
+  let x402Key: string | undefined;
+  if (opts.payment) {
+    const { walletKeyHex, ...rest } = opts.payment;
+    x402Key = walletKeyHex;
+    x402 = { ...rest, walletKeyPath: join(paths.executorDir, "x402-wallet.key") };
+  }
   const executorConfig = (faults: ExecutorFaults): ExecutorConfig => ({
     socketPath: paths.executorSocket,
     internalToken,
@@ -298,6 +311,7 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
     reconcileIntervalMs: opts.reconcileIntervalMs ?? 2_000,
     claimTimeoutMs: opts.claimTimeoutMs ?? 10_000,
     domain: { baseAudience: GATEWAY_AUDIENCE, ...executionDomain },
+    ...(x402 ? { payment: x402 } : {}),
     faults,
   });
   const authConfig = (faults: AuthFaults): AuthConfig => ({
@@ -391,6 +405,7 @@ export async function launchIsolatedSystem(opts: LaunchOptions = {}) {
   }
 
   async function startExecutor(faults: ExecutorFaults = {}): Promise<void> {
+    if (x402 && x402Key !== undefined) install("executor", x402.walletKeyPath, x402Key);
     install("executor", paths.executorConfig, JSON.stringify(executorConfig(faults)));
     await start("executor", paths.executorConfig);
   }

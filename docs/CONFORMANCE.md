@@ -734,3 +734,12 @@ row; `T10`, which includes a tampered-body case, also fails.)
 | Replay protection across restart or multiple gateway instances | PASS for duplicate *payment* across gateway and executor restarts (executor durable `auth_id`, P2A-08); NOT_TESTED for the gateway replay store itself and for multiple executor instances on separate storage | Gateway replay store is in memory |
 | Agent authentication / multi-agent identity | NOT_TESTED | `agent_id` fixed by configuration |
 | Budget release for authorizations that are spent but not paid | PASS (mock; Phase 2C) | Released only with journal proof of non-execution: FI-02, FI-03, FI-07b, CX1b, CX2b; never for uncertain or damaged records (FI-04/08, FI-09) |
+
+## x402 / EIP-3009 testnet integration (Celo Sepolia)
+
+See `docs/TESTNET-X402.md` (requirements, tests X1-X19, XP1-XP5, EV1-EV6, LD1, LIVE-1, limitations) and
+`docs/F-SIBLING-ASSESSMENT.md`.
+* Offline: VERIFIED.
+* Live Celo Sepolia: NOT_TESTED in the development environment (network unreachable). Run with
+  `npm run testnet:live`.
+* Mainnet: not authorized, and refused in code.

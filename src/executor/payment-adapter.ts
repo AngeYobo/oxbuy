@@ -48,6 +48,14 @@ export type AuthorizedPayment = {
   readonly request: PurchaseRequest;
   /** The execution claim the authorization service committed for this attempt (Phase 2D). */
   readonly claim_id: string;
+  /**
+   * Expiry (unix seconds) of the verified OxDeAI authorization. A rail whose signed payment stays
+   * valid for a while (x402 EIP-3009 `validBefore`) must not let it outlive the authorization.
+   * Optional for compatibility: the mock adapter ignores it; the x402 adapter refuses without it.
+   */
+  readonly authorization_expiry?: number;
+  /** Trusted executor callback: must commit the binding before transmission. */
+  readonly persistPaymentBinding?: (binding: import("./payment-journal.ts").PaymentBinding) => void;
 };
 
 /**

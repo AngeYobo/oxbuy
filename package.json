@@ -9,6 +9,8 @@
     "node": ">=22.18"
   },
   "dependencies": {
+    "@noble/curves": "2.2.0",
+    "@noble/hashes": "2.2.0",
     "@oxdeai/core": "2.0.2",
     "@oxdeai/guard": "2.0.3"
   },
@@ -21,6 +23,11 @@
     "test": "node --test \"tests/**/*.test.ts\"",
     "test:evidence": "node --test --test-reporter=spec --test-reporter-destination=evidence/test-results.txt --test-reporter=tap --test-reporter-destination=evidence/test-results.tap \"tests/**/*.test.ts\"",
     "demo": "node src/demo.ts",
-    "demo:isolated": "node src/demo-isolated.ts"
+    "demo:isolated": "node src/demo-isolated.ts",
+    "testnet:live": "node src/testnet/live-demo.ts",
+    "testnet:address": "node src/testnet/address.ts",
+    "buyer": "node src/product/buyer-cli.ts",
+    "x402:probe": "node src/testnet/x402-probe.ts",
+    "oxbuy": "node src/product/buyer-cli.ts"
   }
 }

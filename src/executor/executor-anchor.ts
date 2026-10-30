@@ -41,6 +41,7 @@
  *   - journal ⊄ checkpoint only after a crash between the two writes; those
  *     records were never acted on and are appended at the next open (catch-up).
  */
+import { validatePaymentBinding } from "./payment-binding.ts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -70,6 +71,7 @@ export type AnchorBody =
       claim_id?: string;
       request?: PurchaseRequest;
     }
+  | { kind: "PAYMENT_BINDING"; intent_hash: string; binding: import("./payment-journal.ts").PaymentBinding }
   | { kind: "RESOLVED"; intent_hash: string; resolution: Resolution }
   | { kind: "TORN"; torn_sha256?: string; torn_sha256s?: readonly string[] }
   | { kind: "RECOVERED"; note: string; restored: readonly string[] };
@@ -105,6 +107,7 @@ export type CheckpointState = {
   readonly journalId: string | undefined;
   readonly consumes: ReadonlyMap<string, Extract<AnchorEntry, { kind: "CONSUME" }>>;
   readonly finals: ReadonlyMap<string, Extract<AnchorEntry, { kind: "FINAL" }>>;
+  readonly bindings: ReadonlyMap<string, Extract<AnchorEntry, { kind: "PAYMENT_BINDING" }>>;
   readonly resolved: ReadonlyMap<string, Extract<AnchorEntry, { kind: "RESOLVED" }>>;
   /** Unacknowledged torn line(s) at the end of the file (a crash during an append), oldest first. */
   readonly tornLines: readonly string[];
@@ -151,6 +154,7 @@ export function parseCheckpoint(raw: string): CheckpointState {
   }
   const consumes = new Map<string, Extract<AnchorEntry, { kind: "CONSUME" }>>();
   const finals = new Map<string, Extract<AnchorEntry, { kind: "FINAL" }>>();
+  const bindings = new Map<string, Extract<AnchorEntry, { kind: "PAYMENT_BINDING" }>>();
   const resolved = new Map<string, Extract<AnchorEntry, { kind: "RESOLVED" }>>();
   let journalId: string | undefined;
   entries.forEach((e, i) => {
@@ -162,9 +166,13 @@ export function parseCheckpoint(raw: string): CheckpointState {
     if (e.kind === "GENESIS") throw new CheckpointError("CHECKPOINT_CORRUPT", `second genesis at seq ${e.seq}`);
     if (e.kind === "CONSUME") consumes.set(e.auth_id, e);
     else if (e.kind === "FINAL") finals.set(e.intent_hash, e);
+    else if (e.kind === "PAYMENT_BINDING") {
+      if (bindings.has(e.intent_hash)) throw new CheckpointError("CHECKPOINT_CORRUPT", "duplicate payment binding");
+      bindings.set(e.intent_hash, e);
+    }
     else if (e.kind === "RESOLVED") resolved.set(e.intent_hash, e);
   });
-  return { entries, tip: entries.at(-1), journalId, consumes, finals, resolved, tornLines: pending, needsNewline: raw.length > 0 && !raw.endsWith("\n") };
+  return { entries, tip: entries.at(-1), journalId, consumes, finals, bindings, resolved, tornLines: pending, needsNewline: raw.length > 0 && !raw.endsWith("\n") };
 }
 
 /** Read the checkpoint file. Throws CHECKPOINT_MISSING / CHECKPOINT_UNREADABLE / CHECKPOINT_CORRUPT. */
@@ -205,7 +213,7 @@ export type JournalView = {
   list(): PaymentJournalRecord[];
 };
 
-export type Discrepancy = { readonly kind: "AUTH_MISSING" | "INTENT_MISSING" | "INTENT_REGRESSED" | "RESOLUTION_MISSING"; readonly id: string; readonly detail: string };
+export type Discrepancy = { readonly kind: "PAYMENT_BINDING_MISSING" | "AUTH_MISSING" | "INTENT_MISSING" | "INTENT_REGRESSED" | "RESOLUTION_MISSING"; readonly id: string; readonly detail: string };
 
 const UNREADABLE = "JOURNAL_RECORD_UNREADABLE";
 
@@ -236,7 +244,17 @@ export function compareJournal(cp: CheckpointState, j: JournalView): { rolledBac
     if (r !== undefined && r.detail !== UNREADABLE && r.resolution === undefined) rolledBack.push({ kind: "RESOLUTION_MISSING", id: res.intent_hash, detail: "resolution lost" });
   }
 
+  for (const b of cp.bindings.values()) {
+    const r = j.inspect(b.intent_hash);
+    if (!r || canonical(r.payment_binding ?? null) !== canonical(b.binding)) rolledBack.push({ kind: "PAYMENT_BINDING_MISSING", id: b.intent_hash, detail: "payment binding missing or changed" });
+  }
   const catchUp: AnchorBody[] = [];
+  for (const r of j.list()) {
+    if (r.payment_binding && !cp.bindings.has(r.intent_hash)) {
+      validatePaymentBinding(r, r.payment_binding);
+      catchUp.push({ kind: "PAYMENT_BINDING", intent_hash: r.intent_hash, binding: r.payment_binding });
+    }
+  }
   for (const a of j.auths()) {
     if (a.auth_id === "" || a.detail === UNREADABLE || cp.consumes.has(a.auth_id)) continue;
     const intent = a.disposition === "RESERVED" ? j.inspect(a.intent_hash) : undefined;

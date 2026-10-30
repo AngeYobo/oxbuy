@@ -54,6 +54,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { validatePaymentBinding } from "./payment-binding.ts";
 import type { PurchaseRequest } from "../agent/purchase-request.ts";
 import { appendDurable, createDurable, fsyncDir, isEexist, replaceDurable } from "../durable/durable-file.ts";
 import { acquireExclusiveLock, LockError, type ExclusiveLock } from "../durable/exclusive-lock.ts";
@@ -73,9 +74,30 @@ export type PaymentJournalState = "STARTED" | "SETTLED" | "REFUSED_BEFORE_SIGNIN
 export type PaymentJournalEntry = { readonly state: PaymentJournalState; readonly detail?: string };
 export type AuthDisposition = "RESERVED" | "REJECTED_BEFORE_EXECUTION" | "CANCELLED";
 
-/** Settlement evidence verified by the executor identity (mock: a MAC'd ledger entry, src/adapters/mock-buy/mock-settlement.ts). */
-export type SettlementEvidence = { readonly kind: "MOCK_LEDGER_MAC"; readonly reference: string; readonly mac: string; readonly amount: string };
+/**
+ * Settlement evidence verified by the executor identity:
+ *   MOCK_LEDGER_MAC   a MAC'd mock ledger entry (src/adapters/mock-buy/mock-settlement.ts);
+ *   EIP3009_ONCHAIN   a mined receipt carrying this authorization's AuthorizationUsed + Transfer
+ *                     (src/chain/eip3009-evidence.ts; x402 testnet integration).
+ */
+export type SettlementEvidence =
+  | { readonly kind: "MOCK_LEDGER_MAC"; readonly reference: string; readonly mac: string; readonly amount: string }
+  | import("../chain/eip3009-evidence.ts").OnchainSettlement;
 export type Resolution = { readonly verdict: "SETTLED"; readonly amount: string; readonly evidence: SettlementEvidence; readonly note: string; readonly at: number };
+
+export type PaymentBinding = {
+  readonly intent_hash: string;
+  readonly claim_id: string;
+  readonly chain_id: string;
+  readonly asset: string;
+  readonly payer: string;
+  readonly recipient: string;
+  readonly amount: string;
+  readonly nonce: string;
+  readonly valid_after: string;
+  readonly valid_before: string;
+  readonly signature: string;
+};
 
 export type PaymentJournalRecord = {
   readonly intent_hash: string;
@@ -89,6 +111,7 @@ export type PaymentJournalRecord = {
   readonly started_at: number;
   readonly updated_at: number;
   readonly resolution?: Resolution;
+  readonly payment_binding?: PaymentBinding;
 };
 
 export type AuthRecord = {
@@ -105,6 +128,7 @@ export type Reservation =
   | { readonly ok: false; readonly reason: "DUPLICATE_INTENT"; readonly prior: PaymentJournalState };
 
 export interface PaymentJournal {
+  bindPayment(intentHash: string, binding: PaymentBinding): void;
   /**
    * Atomically consume `auth_id` and record the intent as STARTED. Synchronous
    * so two requests in one process cannot interleave. Throws on storage
@@ -156,6 +180,12 @@ export function createInMemoryPaymentJournal(now: () => number = () => Math.floo
   const records = new Map<string, PaymentJournalRecord>();
   const auths = new Map<string, AuthRecord>();
   return {
+    bindPayment(intentHash, binding) {
+      const r = records.get(intentHash);
+      if (!r || r.state !== "STARTED" || r.payment_binding) throw new Error("PAYMENT_BINDING_REFUSED");
+      validatePaymentBinding(r, binding);
+      records.set(intentHash, { ...r, payment_binding: structuredClone(binding) });
+    },
     reserve({ intent_hash, auth_id, request, claim_id }) {
       const prior = records.get(intent_hash);
       if (prior) return { ok: false, reason: "DUPLICATE_INTENT", prior: prior.state };
@@ -529,6 +559,16 @@ export function openFilePaymentJournal(dir: string, opts: { now?: () => number; 
         replaceDurable(intentPath(dir, f.intent_hash), JSON.stringify({ ...rest, state: f.state, ...(f.detail !== undefined ? { detail: f.detail } : {}), ...(f.receipt !== undefined ? { receipt: f.receipt } : {}), updated_at: at }));
         restored.push(`intent ${f.intent_hash} STARTED->${f.state}`);
       }
+      for (const b of cp.bindings.values()) {
+        const r = reader.inspect(b.intent_hash);
+        if (!r || r.detail === "JOURNAL_RECORD_UNREADABLE") throw new Error("PAYMENT_BINDING_RECOVERY_REFUSED");
+        if (r.payment_binding && JSON.stringify(r.payment_binding) !== JSON.stringify(b.binding)) throw new Error("PAYMENT_BINDING_CONFLICT");
+        validatePaymentBinding(r, b.binding);
+        if (!r.payment_binding) {
+          replaceDurable(intentPath(dir, b.intent_hash), JSON.stringify({ ...r, payment_binding: b.binding }));
+          restored.push(`payment binding ${b.intent_hash}`);
+        }
+      }
       for (const res of cp.resolved.values()) {
         const r = reader.inspect(res.intent_hash);
         if (r === undefined || r.detail === "JOURNAL_RECORD_UNREADABLE" || r.resolution !== undefined) continue;
@@ -545,6 +585,14 @@ export function openFilePaymentJournal(dir: string, opts: { now?: () => number; 
       for (const b of after.catchUp) cp = appendCheckpoint(ck.path, cp, b);
       rolledBack = [];
       return { restored };
+    },
+    bindPayment(intentHash, binding) {
+      writable();
+      const r = reader.inspect(intentHash);
+      if (!r || r.state !== "STARTED" || r.payment_binding) throw new Error("PAYMENT_BINDING_REFUSED");
+      validatePaymentBinding(r, binding);
+      replaceDurable(intentPath(dir, intentHash), JSON.stringify({ ...r, payment_binding: binding }));
+      checkpoint({ kind: "PAYMENT_BINDING", intent_hash: intentHash, binding });
     },
     reserve({ intent_hash, auth_id, request, claim_id }) {
       writable();
@@ -607,6 +655,13 @@ export function openFilePaymentJournal(dir: string, opts: { now?: () => number; 
       if (!prev) throw new Error("JOURNAL_NO_SUCH_INTENT");
       if (prev.state !== "STARTED" && prev.state !== "UNKNOWN") throw new Error(`JOURNAL_NOT_RECONCILABLE:${prev.state}`);
       if (prev.resolution) throw new Error("JOURNAL_ALREADY_RESOLVED");
+      if (evidence.kind === "EIP3009_ONCHAIN") {
+        const b = prev.payment_binding;
+        if (!b || !cp!.bindings.has(intentHash) || compareJournal(cp!, { ...reader, journalId }).rolledBack.length) throw new Error("PAYMENT_BINDING_REQUIRED");
+        validatePaymentBinding(prev, b);
+        if (evidence.amount !== b.amount || evidence.asset !== b.asset || evidence.payer !== b.payer ||
+            evidence.pay_to !== b.recipient || evidence.nonce !== b.nonce || evidence.network !== `eip155:${b.chain_id}`) throw new Error("PAYMENT_BINDING_EVIDENCE_MISMATCH");
+      }
       if (prev.claim_id === undefined) throw new Error("JOURNAL_NOT_RECONCILABLE:no claim");
       const next: PaymentJournalRecord = { ...prev, resolution: { verdict: "SETTLED", amount: evidence.amount, evidence, note, at: now() } };
       replaceDurable(intentPath(dir, intentHash), JSON.stringify(next));

@@ -80,7 +80,21 @@ export const POLICY = {
 };
 
 export function initialPolicyState(): State {
-  const targets = POLICY.allowedServices.map((s) =>
+  return policyStateFor({ services: POLICY.allowedServices, assets: [MOCK_ASSET], budget: POLICY.budget, perActionMax: POLICY.perActionMax });
+}
+
+/**
+ * Policy state for an explicit allowlist (the mock deployment above, or the x402 testnet profile,
+ * src/x402/testnet-profile.ts). Same limits and structure; only the allowed targets, assets, budget
+ * and per-action maximum differ.
+ */
+export function policyStateFor(p: {
+  services: readonly Pick<MockService, "service_id" | "resource" | "network" | "asset" | "pay_to">[];
+  assets: readonly string[];
+  budget: bigint;
+  perActionMax: bigint;
+}): State {
+  const targets = p.services.map((s) =>
     paymentTarget(
       validatePurchaseRequest({
         service_id: s.service_id,
@@ -98,9 +112,9 @@ export function initialPolicyState(): State {
     policy_version: POLICY_VERSION,
     period_id: "phase1",
     kill_switch: { global: false, agents: {} },
-    allowlists: { action_types: ["PAYMENT"], assets: [MOCK_ASSET], targets },
-    budget: { budget_limit: { [AGENT_ID]: POLICY.budget }, spent_in_period: {} },
-    max_amount_per_action: { [AGENT_ID]: POLICY.perActionMax },
+    allowlists: { action_types: ["PAYMENT"], assets: [...p.assets], targets },
+    budget: { budget_limit: { [AGENT_ID]: p.budget }, spent_in_period: {} },
+    max_amount_per_action: { [AGENT_ID]: p.perActionMax },
     velocity: { config: { window_seconds: 60, max_actions: 100 }, counters: {} },
     replay: { window_seconds: 3600, max_nonces_per_agent: 256, nonces: {} },
     recursion: { max_depth: { [AGENT_ID]: 1 } },
