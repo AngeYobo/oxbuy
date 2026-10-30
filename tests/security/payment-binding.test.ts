@@ -63,7 +63,13 @@ test("R-F1b pay receives the full authorized binding: exact request, the verifie
   // Phase 2D: plus the execution claim committed for this attempt (the one journaled for the intent).
   const claimId = sys.harness.executor.journal.inspect(auth.authorization.intent_hash)?.claim_id;
   assert.match(String(claimId), /^[0-9a-f]{32}$/);
-  assert.deepEqual(seen[0], { intent_hash: auth.authorization.intent_hash, request: auth.request, claim_id: claimId });
+  // Testnet integration: plus the verified authorization's expiry (it bounds an EIP-3009 validBefore).
+  const { persistPaymentBinding, ...binding } = seen[0]!;
+  assert.equal(typeof persistPaymentBinding, "function");
+  assert.deepEqual(binding, { intent_hash: auth.authorization.intent_hash, request: auth.request, claim_id: claimId, authorization_expiry: auth.authorization.expiry });
+  // A retained callback still reaches the real journal's final-state guard.
+  const candidate = { intent_hash: "another-intent" } as Parameters<NonNullable<AuthorizedPayment["persistPaymentBinding"]>>[0];
+  assert.throws(() => persistPaymentBinding!(candidate), /PAYMENT_BINDING_REFUSED/);
   assert.equal(result.intent_hash, auth.authorization.intent_hash);
   assert.deepEqual(sys.harness.executor.journal.get(auth.authorization.intent_hash), { state: "SETTLED" });
 });

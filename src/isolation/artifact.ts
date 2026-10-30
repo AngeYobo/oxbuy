@@ -13,7 +13,7 @@
  *       MANIFEST.json              sha256 of every other file; <digest> = sha256(MANIFEST.json)
  *       package.json               fixed: { "type": "module" }
  *       src/**                     application source, copied at seal time
- *       node_modules/@oxdeai/...   extracted from registry tarballs verified below
+ *       node_modules/@oxdeai/..., node_modules/@noble/...   extracted from registry tarballs verified below
  *
  * Trust anchors:
  *   - Dependencies: the operator's npm cache (`~/.npm/_cacache`, not
@@ -60,6 +60,10 @@ import { ROLES, writableBy } from "./identity.ts";
 export const TRUSTED_DEPENDENCIES = [
   { name: "@oxdeai/core", version: "2.0.2" },
   { name: "@oxdeai/guard", version: "2.0.3" },
+  // x402 testnet rail (src/chain/evm.ts): keccak-256 and secp256k1. Audited, zero-dependency; 2.2.0
+  // rebuilt from the git tags reproduces the registry tarballs byte for byte (docs/TESTNET-X402.md §8).
+  { name: "@noble/hashes", version: "2.2.0" },
+  { name: "@noble/curves", version: "2.2.0" },
 ] as const;
 
 const REGISTRY = "https://registry.npmjs.org";

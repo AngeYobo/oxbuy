@@ -184,6 +184,15 @@ test("SI-04 agent edits the lockfile to point at other dependency bytes: seal fa
   }
 });
 
+test("SI-04-noble (patch 0010, XR-08) agent edits the lockfile integrity of a trusted crypto dependency (@noble/curves): seal fails closed", opts, () => {
+  const wt = workingTree();
+  const lock = join(wt, "package-lock.json");
+  const before = readFileSync(lock, "utf8");
+  assert.equal(asAgent(`sed -i 's#sha512-T/BoHgFX[^"]*#sha512-AAAA#' '${lock}'`).status, 0);
+  assert.notEqual(readFileSync(lock, "utf8"), before, "the agent's edit is on disk");
+  assert.throws(() => sealArtifact({ sourceRoot: wt, store }), /SEAL_LOCKFILE_MISMATCH:@noble\/curves/);
+});
+
 test("SI-05 agent cannot alter the trust store, the approval, the artifact, or the runtime configuration", opts, async () => {
   const art = join(store, "artifacts", approved);
   for (const target of [join(store, "approved"), join(art, "src/isolation/executor-main.ts"), join(art, "MANIFEST.json"), join(store, "artifacts", "new")]) {

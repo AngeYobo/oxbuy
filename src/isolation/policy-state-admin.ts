@@ -52,6 +52,7 @@ import { createInMemoryPolicyStateStore } from "../authorization/policy-state.ts
 import { anchorPayload, initialStateFile, parseStateFile, rebuildStateBytes, stateFileBytes, type PolicyBinding } from "../authorization/policy-state-file.ts";
 import { freezeForRestore } from "../authorization/reservations.ts";
 import { AGENT_ID, GATEWAY_AUDIENCE, initialPolicyState, PDP_ISSUER, POLICY, POLICY_VERSION } from "../system.ts";
+import type { State } from "@oxdeai/core";
 import { identityOf } from "./identity.ts";
 
 export type PolicySettings = { readonly ttlSeconds?: number };
@@ -171,7 +172,7 @@ function completePrepared(anchorPath: string, stateDir: string, bytes: string, c
  * First-time initialization of the policy state for one policy identity.
  * Throws POLICY_STATE_EXISTS if this binding was ever initialized under the root.
  */
-export function initPolicyState(opts: { stateRoot: string; budget?: string; ttlSeconds?: number }): { binding: PolicyBinding; stateDir: string } {
+export function initPolicyState(opts: { stateRoot: string; budget?: string; ttlSeconds?: number; state?: State }): { binding: PolicyBinding; stateDir: string } {
   const binding = policyBinding({ ttlSeconds: opts.ttlSeconds });
   const stateDir = policyStateDir(opts.stateRoot, binding);
   const anchorPath = anchorPathOf(opts.stateRoot, binding);
@@ -184,7 +185,8 @@ export function initPolicyState(opts: { stateRoot: string; budget?: string; ttlS
   }
   const auth = authId();
   must(["chown", `${auth.uid}:${auth.gid}`, stateDir], "POLICY_STATE_INIT_FAILED");
-  const state = initialPolicyState();
+  // `state`: an explicit deployment profile (the x402 testnet profile, src/x402/testnet-profile.ts); default: the mock deployment.
+  const state = opts.state ?? initialPolicyState();
   if (opts.budget !== undefined) state.budget.budget_limit[binding.agentId] = BigInt(opts.budget);
   const bytes = initialStateFile(binding, state);
   // PREPARE first: a crash before state.json exists leaves a refusing, inspectable state

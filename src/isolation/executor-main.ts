@@ -17,8 +17,12 @@
  *
  *   node executor-main.ts <executor-config.json>
  */
+import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createMockBuyAdapter } from "../adapters/mock-buy/mock-buy.ts";
+import { createX402EvmAdapter } from "../adapters/x402-evm/x402-evm.ts";
+import { parsePrivateKey } from "../chain/evm.ts";
+import { createHttpRpc } from "../chain/rpc.ts";
 import { withMockSettlement } from "../adapters/mock-buy/mock-settlement.ts";
 import { createPaymentExecutor } from "../executor/executor.ts";
 import { domainAudience } from "../executor/execution-domain.ts";
@@ -85,8 +89,39 @@ try {
   }
   if (config.verification.expectedAudience !== domainAudience(config.domain.baseAudience, d)) refuse(78, "EXECUTION_DOMAIN_MISMATCH:audience");
 }
-const mock = createMockBuyAdapter(config.services.map((s) => ({ ...s, price: BigInt(s.price) })));
-const adapter = withFaults(withMockSettlement(mock.adapter, { ...config, journalId: journal.journalId }), faults);
+/** x402 fault: the seller answered the signed payment, and the executor dies before reading the answer. */
+const faultFetch: typeof fetch = async (input, init) => {
+  const res = await fetch(input, init);
+  const h = new Headers(init?.headers);
+  if (faults.crashAfterPaymentSent && h.has("payment-signature")) {
+    await res.arrayBuffer().catch(() => undefined);
+    process.kill(process.pid, "SIGKILL");
+  }
+  return res;
+};
+function railAdapter(): PaymentAdapter {
+  const p = config.payment;
+  if (p === undefined) {
+    const mock = createMockBuyAdapter(config.services.map((s) => ({ ...s, price: BigInt(s.price) })));
+    return withMockSettlement(mock.adapter, { ...config, journalId: journal.journalId });
+  }
+  if (p.kind !== "x402-evm") refuse(78, `PAYMENT_RAIL_UNKNOWN:${String((p as { kind?: unknown }).kind)}`);
+  try {
+    return createX402EvmAdapter({
+      network: p.network,
+      rpc: createHttpRpc(p.rpcUrl),
+      loadWalletKey: () => parsePrivateKey(readFileSync(p.walletKeyPath, "utf8")),
+      approvedRecipients: p.approvedRecipients,
+      endpoints: p.endpoints,
+      receiptTimeoutMs: p.receiptTimeoutMs,
+      fetch: faultFetch,
+      log: emit,
+    });
+  } catch (err) {
+    refuse(78, (err as Error).message);
+  }
+}
+const adapter = withFaults(railAdapter(), faults);
 // The authorization service as execution authority (Phase 2D), over the peer-proofed settle channel.
 // Any transport failure is a non-definitive claim answer: the attempt is abandoned, never paid.
 const authority: ExecutionAuthority = {

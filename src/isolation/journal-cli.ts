@@ -12,6 +12,8 @@
  *   node journal-cli.ts <journalDir> seal                 (once; the checkpoint must exist and be empty)
  *   node journal-cli.ts <journalDir> verify               (read-only: journal against its checkpoint)
  *   node journal-cli.ts <journalDir> recover <note>       (re-import facts lost by a journal rollback)
+ *   node journal-cli.ts <journalDir> resolve-x402 <intent_hash> <tx_hash> <rpcUrl> <walletKeyPath> <note>
+ *                                                         (x402 testnet rail: settlement proven on chain)
  *
  * Checkpoint (AUD-02/03/04, src/executor/executor-anchor.ts): `<executorStateRoot>.anchor/<journal_id>.log`.
  * `resolve`, `seal` and `recover` take the journal's writer lock (executor stopped) and append to the
@@ -27,12 +29,25 @@
  * restart the executor reports RESOLVED_SETTLED with the evidenced amount, and
  * the auth service confirms the claim.
  *
+ * `resolve-x402` (x402 / EIP-3009 testnet rail): the evidence is the chain itself. The receipt of
+ * <tx_hash> must be mined, successful, and carry FROM THE AUTHORIZED TOKEN both AuthorizationUsed(payer,
+ * nonce) and Transfer(payer -> authorized recipient, value <= authorized max), with nonce = f(intent
+ * hash) and payer = the address of the executor's wallet key; the chain id must be the authorized
+ * testnet's (src/chain/eip3009-evidence.ts). A pending, reverted, or unrelated transaction is refused.
+ *
  * There is no NOT_SETTLED resolution: a missing ledger entry is not proof
  * that nothing was paid, and the mock has no positive evidence of
  * non-execution. Such a reservation stays UNCERTAIN and charged.
  */
+import { approvedReconciliationRpc } from "../chain/reconciliation-rpc.ts";
+import { validatePaymentBinding } from "../executor/payment-binding.ts";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { verifySettlementEvidence } from "../adapters/mock-buy/mock-settlement.ts";
+import { verifyOnchainSettlement } from "../chain/eip3009-evidence.ts";
+import { addressOfPrivateKey, eip3009NonceForIntent, HEX32, parsePrivateKey } from "../chain/evm.ts";
+import { authorizedAsset, authorizedTestnet } from "../chain/networks.ts";
+import { createHttpRpc } from "../chain/rpc.ts";
 import { compareJournal, executorAnchorPathFor, loadCheckpointFor } from "../executor/executor-anchor.ts";
 import { initFilePaymentJournal, journalIdOf, openFilePaymentJournal, readFilePaymentJournal } from "../executor/payment-journal.ts";
 
@@ -75,6 +90,38 @@ switch (command) {
         { intent_hash: record.intent_hash, claim_id: record.claim_id, journal_id: journal.journalId, request: record.request },
       );
       out = journal.resolve(record.intent_hash, evidence, note.join(" "));
+    } finally {
+      journal.close();
+    }
+    break;
+  }
+  case "resolve-x402": {
+    const [txHash, rpcUrl, walletKeyPath, ...rest] = [verdict, ...note];
+    if (!txHash || !HEX32.test(txHash.toLowerCase())) throw new Error("usage: resolve-x402 <intent_hash> <tx_hash> <rpcUrl> <walletKeyPath> <note>");
+    if (!rpcUrl || !walletKeyPath || rest.length === 0) throw new Error("rpcUrl, walletKeyPath and a reconciliation note are required");
+    const approvedRpc = approvedReconciliationRpc(rpcUrl, process.env.OXDEAI_RECONCILIATION_RPC_POLICY ?? join(dirname(resolvePath(dir)), "reconciliation-rpc.json"));
+    const journal = openFilePaymentJournal(dir, { checkpoint: { path: checkpointPath() } });
+    try {
+      const record = journal.inspect(intentHash ?? "");
+      if (!record || record.claim_id === undefined) throw new Error("JOURNAL_NOT_RECONCILABLE:no claimed intent");
+      if (!record.payment_binding) throw new Error("JOURNAL_NOT_RECONCILABLE:missing durable payment binding");
+      validatePaymentBinding(record, record.payment_binding);
+      const network = authorizedTestnet(record.request.network);
+      const asset = authorizedAsset(network, record.request.asset);
+      const key = parsePrivateKey(readFileSync(walletKeyPath, "utf8"));
+      const payer = addressOfPrivateKey(key);
+      key.fill(0);
+      if (payer !== record.payment_binding.payer) throw new Error("PAYMENT_BINDING_INVALID:payer");
+      const evidence = await verifyOnchainSettlement(createHttpRpc(approvedRpc), network, {
+        asset: asset.address,
+        payer,
+        payTo: record.request.recipient,
+        nonce: eip3009NonceForIntent(record.intent_hash),
+        maxAmount: BigInt(record.request.max_amount),
+        signedAmount: BigInt(record.payment_binding.amount),
+        txHash: txHash.toLowerCase(),
+      });
+      out = { ...journal.resolve(record.intent_hash, evidence, rest.join(" ")), explorer: network.explorerTxUrl(evidence.reference) };
     } finally {
       journal.close();
     }
