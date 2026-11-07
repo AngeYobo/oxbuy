@@ -125,6 +125,23 @@ npm run demo
 
 The default demo runs offline with mock payments. It does not access a wallet or the Celo network.
 
+### Test Coverage
+
+The default test suite can run without live wallet credentials.
+
+Latest local run (November 7, 2026):
+
+- **328 tests discovered**
+- **229 passed**
+- **0 failed**
+- **99 skipped**
+
+The skipped tests include OS-isolation and recovery scenarios requiring dedicated `oxdeai-*` system accounts, plus live Celo Sepolia tests requiring explicit opt-in and testnet credentials.
+
+A successful default test run does not establish that the OS-isolated or live-payment scenarios have passed in the current environment.
+
+See [Isolation](docs/ISOLATION.md) and [Testnet x402](docs/TESTNET-X402.md) for the additional setup requirements.
+
 ### Isolated Security Demo
 
 Run `npm run demo:isolated` after completing the setup in [ISOLATION.md](docs/ISOLATION.md).
