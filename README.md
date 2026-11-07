@@ -112,6 +112,51 @@ TypeScript, Node.js, OxDeAI, Celo, x402, ERC-8004, ERC-8021 and viem.
 4. Deliver a useful result to a real user.
 5. Prepare a controlled mainnet demonstration.
 
+## Quick Start
+
+**Requirements:** Node.js 22.18+ and npm.
+
+```sh
+npm ci
+npm run typecheck
+npm test
+npm run demo
+```
+
+The default demo runs offline with mock payments. It does not access a wallet or the Celo network.
+
+### Isolated Security Demo
+
+Run `npm run demo:isolated` after completing the setup in [ISOLATION.md](docs/ISOLATION.md).
+
+This demonstration uses separate OS identities and mock payments. It requires an operator-approved artifact and initialized persistent policy and executor state.
+
+### x402 Purchase Demo
+
+The OxBuy purchasing CLI targets Celo Sepolia:
+
+```sh
+npm run oxbuy -- --catalog <catalog.json> --topic "competitor research" --deny-demo
+```
+
+This command requires a configured service catalog and a funded Celo Sepolia test wallet.
+
+The purchasing CLI uses `createGuardedStack()` and does not provide the same OS-level isolation as the isolated security demo.
+
+See [OXBUY.md](docs/OXBUY.md) for configuration and execution instructions.
+
+## Verification and Limitations
+
+- **ERC-8004:** Registered on Celo Sepolia, Agent ID `890`.
+- **Live x402 purchase:** No independently verified payment transaction is documented in this README.
+- **Celo mainnet:** Explicitly disabled.
+- **Credential isolation:** The OS-isolated demonstration uses mock payments. Equivalent isolation is not established for the purchasing CLI.
+- **Financial integrity:** F-SIBLING remains an unresolved risk.
+- **Independent security verification:** Incomplete.
+
+See [F-SIBLING Assessment](docs/F-SIBLING-ASSESSMENT.md) and [Conformance](docs/CONFORMANCE.md).
+
+
 ## Built with OxDeAI
 
 OxBuy is an application built on top of OxDeAI's deterministic authorization protocol.
