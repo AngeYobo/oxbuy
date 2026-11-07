@@ -4,7 +4,6 @@
 
 OxBuy is an AI purchasing agent that discovers and buys paid API services through x402 on Celo, with deterministic authorization powered by [OxDeAI](https://github.com/oxdeai/oxdeai).
 
-**Website:** oxbuy.ai (planned)
 **Hackathon:** [Agents on Open Rails](https://www.loops.house/agents-on-open-rails/)
 **Track:** Build with buy
 **Status:** Proof of Concept
