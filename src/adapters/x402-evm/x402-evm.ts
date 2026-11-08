@@ -27,7 +27,7 @@
  */
 import { authorizationConsumed, settlementInReceipt } from "../../chain/eip3009-evidence.ts";
 import { addressOfPrivateKey, eip3009NonceForIntent, HEX32, signTransferAuthorization } from "../../chain/evm.ts";
-import { authorizedAsset, authorizedTestnet, type EvmNetwork } from "../../chain/networks.ts";
+import { authorizedAsset, authorizedNetwork, type EvmNetwork } from "../../chain/networks.ts";
 import type { EvmRpc } from "../../chain/rpc.ts";
 import {
   PaymentRefusedError,
@@ -87,7 +87,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const lc = (s: string) => s.toLowerCase();
 
 export function createX402EvmAdapter(cfg: X402EvmConfig): PaymentAdapter {
-  const network: EvmNetwork = authorizedTestnet(cfg.network);
+  const network: EvmNetwork = authorizedNetwork(cfg.network);
   const approved = new Set(cfg.approvedRecipients.map(lc));
   const now = cfg.now ?? (() => Math.floor(Date.now() / 1000));
   const f = cfg.fetch ?? fetch;
@@ -188,7 +188,7 @@ export function createX402EvmAdapter(cfg: X402EvmConfig): PaymentAdapter {
       // ── Before signing: any failure means nothing was signed (PaymentRefusedError). ──
       let net: EvmNetwork;
       try {
-        net = authorizedTestnet(r.network);
+        net = authorizedNetwork(r.network);
       } catch (err) {
         throw new PaymentRefusedError((err as Error).message);
       }

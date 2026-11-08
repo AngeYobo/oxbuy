@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 /** Validate signed payment evidence; persistence and identity association use the protected checkpoint. */
 import { eip3009NonceForIntent, recoverTransferAuthorizationSigner } from "../chain/evm.ts";
-import { authorizedAsset, authorizedTestnet } from "../chain/networks.ts";
+import { authorizedAsset, authorizedNetwork } from "../chain/networks.ts";
 import type { PaymentBinding, PaymentJournalRecord } from "./payment-journal.ts";
 
 export function validatePaymentBinding(r: PaymentJournalRecord, b: PaymentBinding): void {
   try {
-    const net = authorizedTestnet(r.request.network);
+    const net = authorizedNetwork(r.request.network);
     const asset = authorizedAsset(net, r.request.asset);
     const decimal = /^(0|[1-9][0-9]*)$/;
     if (!b || ![b.amount, b.chain_id, b.valid_after, b.valid_before].every((x) => typeof x === "string" && decimal.test(x)) ||

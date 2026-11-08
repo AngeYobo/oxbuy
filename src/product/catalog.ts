@@ -7,7 +7,7 @@
  * (allowlisted targets, per-action maximum, budget). Values for a real provider come from its live 402
  * (`npm run x402:probe`) and must be reviewed by a human before use.
  */
-import { authorizedAsset, authorizedTestnet } from "../chain/networks.ts";
+import { authorizedAsset, authorizedNetwork } from "../chain/networks.ts";
 
 export type CatalogService = {
   readonly service_id: string;
@@ -44,7 +44,7 @@ export function validateCatalog(c: unknown): Catalog {
   if (typeof c !== "object" || c === null) return fail("not an object");
   const k = c as Record<string, unknown>;
   if (typeof k.network !== "string") return fail("network");
-  const net = authorizedTestnet(k.network);
+  const net = authorizedNetwork(k.network);
   for (const f of ["budget", "per_call_max"] as const) if (typeof k[f] !== "string" || !ATOMIC.test(k[f] as string)) fail(f);
   if (BigInt(k.per_call_max as string) > BigInt(k.budget as string)) fail("per_call_max exceeds budget");
   if (!Array.isArray(k.services) || k.services.length === 0 || k.services.length > 32) return fail("services");
