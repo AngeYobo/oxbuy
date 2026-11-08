@@ -28,6 +28,7 @@
     "testnet:address": "node src/testnet/address.ts",
     "buyer": "node src/product/buyer-cli.ts",
     "x402:probe": "node src/testnet/x402-probe.ts",
-    "oxbuy": "node src/product/buyer-cli.ts"
+    "oxbuy": "node src/product/buyer-cli.ts",
+    "web": "node src/web/server.ts"
   }
 }

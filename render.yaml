@@ -1,0 +1,25 @@
+# OxBuy web app on Render (https://render.com/docs/blueprint-spec).
+# Live purchases stay OFF until OXBUY_LIVE is set to 1 and the two secrets below are filled in the dashboard.
+services:
+  - type: web
+    name: oxbuy
+    runtime: node
+    plan: free
+    buildCommand: npm ci --ignore-scripts
+    startCommand: node src/web/server.ts
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.18.0
+      - key: OXBUY_LIVE
+        value: "0"
+      - key: OXBUY_LIVE_MAX_PURCHASES
+        value: "10"
+      - key: OXBUY_LIVE_PER_CLIENT
+        value: "2"
+      # Testnet payer key (hex) of a DEDICATED demo wallet funded only with what you accept to spend.
+      - key: OXBUY_PAYER_KEY
+        sync: false
+      # The reviewed operator catalog JSON (or commit config/usebuy-celo-sepolia.json and omit this).
+      - key: OXBUY_CATALOG_JSON
+        sync: false

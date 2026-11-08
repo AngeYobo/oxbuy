@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OxBuy</title>
+  <meta name="description" content="An agent that pays for APIs with x402 on Celo, and cannot pay for anything OxDeAI did not authorize.">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-row">
+      <a class="mark" href="/"><img src="/logo.png" width="44" height="44" alt="">OxBuy</a>
+      <nav class="top-links" aria-label="Project links">
+        <a href="https://github.com/AngeYobo/oxbuy">Source on GitHub</a>
+        <a href="https://github.com/oxdeai/oxdeai">OxDeAI protocol</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="intro wrap">
+      <h1>An agent that pays for APIs, and cannot pay for anything it was not authorized to.</h1>
+      <p class="lede">OxBuy buys paid API calls over x402 with USDC on Celo. Before any payment is signed, OxDeAI checks that the exact purchase was authorized: the service, the recipient, the price, the request itself. If anything differs, the wallet key is never even read.</p>
+    </section>
+
+    <section class="play wrap" aria-labelledby="play-h">
+      <div class="play-head">
+        <h2 id="play-h">Try to make it pay for the wrong thing</h2>
+        <button class="btn btn-quiet" id="run-all" type="button">Run all eight</button>
+      </div>
+      <p class="note">Each scenario runs on the server, now, with the real OxDeAI policy, gateway and executor and the real x402 signing code. The chain and the seller are simulated and a throwaway key signs, so nothing moves on a real network.</p>
+
+      <div class="play-grid">
+        <ul class="scenarios" id="scenarios" aria-label="Scenarios"></ul>
+
+        <div class="trace" id="trace" aria-live="polite">
+          <div class="trace-empty" id="trace-empty">
+            <p>Pick a scenario. The trace shows each layer the purchase went through, and the one that stopped it.</p>
+          </div>
+          <div class="trace-body" id="trace-body" hidden>
+            <div class="verdict" id="verdict">
+              <span class="verdict-word" id="verdict-word"></span>
+              <span class="verdict-reason" id="verdict-reason"></span>
+            </div>
+            <dl class="facts">
+              <div><dt>Wallet key reads</dt><dd id="f-keys"></dd></div>
+              <div><dt>Transfers on chain</dt><dd id="f-transfers"></dd></div>
+              <div><dt>Stopped by</dt><dd id="f-layer"></dd></div>
+              <div><dt>Time</dt><dd id="f-ms"></dd></div>
+            </dl>
+            <ol class="rail" id="rail"></ol>
+          </div>
+          <div class="summary" id="summary" hidden>
+            <table>
+              <caption>All scenarios, run just now</caption>
+              <thead><tr><th scope="col">Scenario</th><th scope="col">Result</th><th scope="col">Stopped by</th><th scope="col">Key reads</th><th scope="col">Transfers</th></tr></thead>
+              <tbody id="summary-rows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="live wrap" aria-labelledby="live-h">
+      <h2 id="live-h">Make one real purchase on Celo Sepolia</h2>
+      <p class="note" id="live-note">Checking whether live purchases are available…</p>
+      <form class="live-form" id="live-form" hidden>
+        <label for="topic">Topic to research on X</label>
+        <div class="live-row">
+          <input id="topic" name="topic" type="text" minlength="2" maxlength="60" required placeholder="Celo stablecoins" autocomplete="off">
+          <button class="btn" id="live-btn" type="submit">Buy the brief</button>
+        </div>
+        <p class="hint" id="live-hint"></p>
+      </form>
+      <div class="live-out" id="live-out" hidden></div>
+    </section>
+
+    <section class="real wrap" aria-labelledby="real-h">
+      <h2 id="real-h">What is real on this page</h2>
+      <div class="real-grid">
+        <div>
+          <h3>Real</h3>
+          <ul>
+            <li>The OxDeAI authorization service, payment gateway, executor and journal, in both sections.</li>
+            <li>The x402 client: it reads the seller's 402, compares it with the authorization and signs an EIP-3009 transfer whose nonce is derived from the authorized intent, so one authorization can settle at most once.</li>
+            <li>The live purchase: a USDC payment on Celo Sepolia to the buy gateway, visible on the block explorer.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Simulated or limited</h3>
+          <ul>
+            <li>In the playground, the chain, the facilitator and the seller are local simulations.</li>
+            <li>The agent is a script, not a language model. It proposes purchases; OxDeAI decides.</li>
+            <li>This page uses testnet only. Mainnet purchases need an explicit operator opt-in in the command-line tool and are never exposed here.</li>
+            <li>The live path runs the agent, the policy and the wallet key in one server process. The process-isolated deployment is in the repository and is not what this page runs.</li>
+          </ul>
+        </div>
+      </div>
+      <p class="evidence">Runs from the command line on 8 November 2026, 0.005 USDC each: Celo mainnet <a href="https://celo.blockscout.com/tx/0x6c7cb96e3dd7d92da2ed26374b4c22445b860bd20b69ad28b837be16f1fd1b59"><code>0x6c7cb96e…fd1b59</code></a>, Celo Sepolia <a href="https://celo-sepolia.blockscout.com/tx/0x29bacbec78327d7c950e79732db8751fa9822a17fca371c386ba0fadca6ef937"><code>0x29bacbec…6ef937</code></a>.</p>
+    </section>
+  </main>
+
+  <footer class="foot wrap">
+    <p>OxBuy is a proof of concept built on <a href="https://github.com/oxdeai/oxdeai">OxDeAI</a>, an open protocol for deterministic authorization of agent actions. <span id="commit"></span></p>
+  </footer>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

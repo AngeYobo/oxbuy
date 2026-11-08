@@ -124,6 +124,16 @@ npm run demo
 
 The default demo runs offline with mock payments. It does not access a wallet or the Celo network.
 
+### Web app
+
+```sh
+npm run web    # http://localhost:3000
+```
+
+Eight scenarios (an approved purchase and seven attacks) run on the real OxDeAI and x402 code against a simulated
+chain, and an optional, capped live purchase on Celo Sepolia. Live purchases are off unless `OXBUY_LIVE=1`.
+See [docs/WEB.md](docs/WEB.md) for what is real, the limits, and deployment on Render (`render.yaml`).
+
 ### Test Coverage
 
 The default test suite can run without live wallet credentials.
