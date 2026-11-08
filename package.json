@@ -1,8 +1,8 @@
 {
-  "name": "oxdeai-celo-poc",
+  "name": "oxbuy",
   "version": "0.1.0",
   "private": true,
-  "description": "OxDeAI pre-execution authorization gateway for x402 payments via @celo/buy (Phase 1: local mock only)",
+  "description": "Catalog-driven x402 purchasing PoC on Celo Sepolia with deterministic pre-execution authorization enforced by OxDeAI",
   "license": "MIT",
   "type": "module",
   "engines": {
