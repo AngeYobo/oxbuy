@@ -46,7 +46,7 @@ import { dirname, join, resolve as resolvePath } from "node:path";
 import { verifySettlementEvidence } from "../adapters/mock-buy/mock-settlement.ts";
 import { verifyOnchainSettlement } from "../chain/eip3009-evidence.ts";
 import { addressOfPrivateKey, eip3009NonceForIntent, HEX32, parsePrivateKey } from "../chain/evm.ts";
-import { authorizedAsset, authorizedTestnet } from "../chain/networks.ts";
+import { authorizedAsset, authorizedNetwork } from "../chain/networks.ts";
 import { createHttpRpc } from "../chain/rpc.ts";
 import { compareJournal, executorAnchorPathFor, loadCheckpointFor } from "../executor/executor-anchor.ts";
 import { initFilePaymentJournal, journalIdOf, openFilePaymentJournal, readFilePaymentJournal } from "../executor/payment-journal.ts";
@@ -106,7 +106,7 @@ switch (command) {
       if (!record || record.claim_id === undefined) throw new Error("JOURNAL_NOT_RECONCILABLE:no claimed intent");
       if (!record.payment_binding) throw new Error("JOURNAL_NOT_RECONCILABLE:missing durable payment binding");
       validatePaymentBinding(record, record.payment_binding);
-      const network = authorizedTestnet(record.request.network);
+      const network = authorizedNetwork(record.request.network);
       const asset = authorizedAsset(network, record.request.asset);
       const key = parsePrivateKey(readFileSync(walletKeyPath, "utf8"));
       const payer = addressOfPrivateKey(key);

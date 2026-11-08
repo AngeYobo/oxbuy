@@ -16,7 +16,7 @@
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { CELO_SEPOLIA } from "../chain/networks.ts";
+import { authorizedNetwork, CELO_MAINNET, CELO_SEPOLIA, MAINNET_APPROVAL } from "../chain/networks.ts";
 import { parsePrivateKey } from "../chain/evm.ts";
 import { createHttpRpc } from "../chain/rpc.ts";
 import { validateCatalog } from "./catalog.ts";
@@ -31,14 +31,25 @@ export async function runBuyer(argv: string[], env: NodeJS.ProcessEnv = process.
   const catalogPath = arg("catalog");
   const topic = arg("topic");
   if (!catalogPath || !topic) throw new Error("usage: oxbuy -- --catalog <file> --topic <topic> [--service <id>] [--deny-demo]");
-  const catalog = validateCatalog(JSON.parse(readFileSync(catalogPath, "utf8")));
+  const rawCatalog = JSON.parse(readFileSync(catalogPath, "utf8"));
+  const mainnet = rawCatalog.network === CELO_MAINNET.caip2;
+  if (mainnet && (!argv.includes("--mainnet") || env.OXDEAI_ENABLE_CELO_MAINNET !== MAINNET_APPROVAL))
+    throw new Error("BUYER_MAINNET_NOT_APPROVED:requires --mainnet and OXDEAI_ENABLE_CELO_MAINNET=I_ACCEPT_REAL_MONEY_RISK");
+  const catalog = validateCatalog(rawCatalog);
+  const network = authorizedNetwork(catalog.network);
+  if (mainnet && (catalog.budget !== "5000" || catalog.per_call_max !== "5000" ||
+      catalog.services.length !== 1 || catalog.services[0]?.asset !== CELO_MAINNET.assets[0]?.address ||
+      catalog.services[0]?.pay_to !== "0x20faaca5f980e29639a0fcc6dca6988e18ed333b" ||
+      catalog.services[0]?.url !== "https://gateway.usebuy.ai/v1/social/x/posts/search" ||
+      catalog.services[0]?.method !== "POST" || catalog.services[0]?.max_price !== "5000"))
+    throw new Error("BUYER_MAINNET_PROFILE_MISMATCH");
   const serviceId = arg("service") ?? catalog.services[0]!.service_id;
-  const keyFile = env.OXDEAI_TESTNET_PAYER_KEY_FILE;
-  if (!keyFile) throw new Error("set OXDEAI_TESTNET_PAYER_KEY_FILE (a 0600 testnet key file)");
+  const keyFile = mainnet ? env.OXDEAI_MAINNET_PAYER_KEY_FILE : env.OXDEAI_TESTNET_PAYER_KEY_FILE;
+  if (!keyFile) throw new Error(`set ${mainnet ? "OXDEAI_MAINNET_PAYER_KEY_FILE" : "OXDEAI_TESTNET_PAYER_KEY_FILE"} (0600)`);
   if ((statSync(keyFile).mode & 0o077) !== 0) throw new Error(`${keyFile} must be mode 0600`);
-  const rpc = createHttpRpc(env.OXDEAI_TESTNET_RPC_URL ?? CELO_SEPOLIA.defaultRpcUrl, { timeoutMs: 15_000 });
+  const rpc = createHttpRpc((mainnet ? env.OXDEAI_MAINNET_RPC_URL : env.OXDEAI_TESTNET_RPC_URL) ?? network.defaultRpcUrl, { timeoutMs: 15_000 });
   const chainId = await rpc.chainId();
-  if (chainId !== CELO_SEPOLIA.chainId) throw new Error(`BUYER_WRONG_CHAIN:${chainId}; Celo Sepolia only`);
+  if (chainId !== network.chainId) throw new Error(`BUYER_WRONG_CHAIN:${chainId}; expected ${network.chainId}`);
 
   const runId = new Date().toISOString().replace(/[:.]/g, "-");
   const events: Record<string, unknown>[] = [];
@@ -52,13 +63,13 @@ export async function runBuyer(argv: string[], env: NodeJS.ProcessEnv = process.
     endpoints: extra.endpoints,
     log: (e) => events.push(e),
   });
-  const buyer = createGuardedBuyer(stack, catalog, { explorer: CELO_SEPOLIA.explorerTxUrl });
+  const buyer = createGuardedBuyer(stack, catalog, { explorer: network.explorerTxUrl });
   const results: Record<string, unknown> = {};
   try {
     out(`OxBuy · purchases authorized by OxDeAI · topic "${topic}" · service ${serviceId} · budget ${catalog.budget} · per call ≤ ${catalog.per_call_max}`);
     const r = await buyer.brief(topic, serviceId);
     results.authorized = r.purchase;
-    out(`authorized purchase: ${r.purchase.decision}${r.purchase.tx ? ` · tx ${r.purchase.tx} · ${CELO_SEPOLIA.explorerTxUrl(r.purchase.tx)}` : ""}${r.purchase.detail ? ` · ${r.purchase.detail}` : ""}`);
+    out(`authorized purchase: ${r.purchase.decision}${r.purchase.tx ? ` · tx ${r.purchase.tx} · ${network.explorerTxUrl(r.purchase.tx)}` : ""}${r.purchase.detail ? ` · ${r.purchase.detail}` : ""}`);
     if (r.brief) {
       out("");
       out(r.brief.markdown);

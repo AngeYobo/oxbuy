@@ -30,7 +30,7 @@ export type EvmNetwork = {
   /** CAIP-2 identifier, as used in x402 v2 `network`. */
   readonly caip2: string;
   readonly chainId: bigint;
-  readonly testnet: true;
+  readonly testnet: boolean;
   readonly defaultRpcUrl: string;
   readonly explorerTxUrl: (hash: string) => string;
   readonly facilitatorUrl: string;
@@ -74,4 +74,26 @@ export function authorizedAsset(network: EvmNetwork, address: string): Eip3009As
   const a = network.assets.find((x) => x.address === address.toLowerCase());
   if (!a) throw new Error(`ASSET_NOT_AUTHORIZED:${address} on ${network.caip2}`);
   return a;
+}
+
+/** Mainnet is opt-in per process, never an implicit extension of testnet authorization. */
+export const CELO_MAINNET: EvmNetwork = Object.freeze({
+  name: "Celo Mainnet", caip2: "eip155:42220", chainId: 42220n,
+  testnet: false, defaultRpcUrl: "https://forno.celo.org",
+  explorerTxUrl: (hash: string) => `https://celo.blockscout.com/tx/${hash}`,
+  facilitatorUrl: "https://api.x402.celo.org",
+  assets: Object.freeze([Object.freeze({
+    address: "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
+    symbol: "USDC", decimals: 6, eip712Name: "USDC", eip712Version: "2",
+  })]),
+});
+
+export const MAINNET_APPROVAL = "I_ACCEPT_REAL_MONEY_RISK";
+export function authorizedNetwork(caip2: string): EvmNetwork {
+  if (caip2 === CELO_MAINNET.caip2) {
+    if (process.env.OXDEAI_ENABLE_CELO_MAINNET !== MAINNET_APPROVAL)
+      throw new Error("NETWORK_NOT_AUTHORIZED:mainnet requires explicit operator approval");
+    return CELO_MAINNET;
+  }
+  return authorizedTestnet(caip2);
 }

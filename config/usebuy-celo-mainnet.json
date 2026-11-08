@@ -1,0 +1,17 @@
+{
+  "network": "eip155:42220",
+  "budget": "5000",
+  "per_call_max": "5000",
+  "services": [
+    {
+      "service_id": "usebuy-x-posts-search",
+      "method": "POST",
+      "url": "https://gateway.usebuy.ai/v1/social/x/posts/search",
+      "network": "eip155:42220",
+      "asset": "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
+      "pay_to": "0x20faaca5f980e29639a0fcc6dca6988e18ed333b",
+      "max_price": "5000",
+      "purpose": "Search X posts for an intelligence brief"
+    }
+  ]
+}
