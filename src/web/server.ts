@@ -35,6 +35,7 @@ const STATIC: Record<string, { file: string; type: string }> = {
   "/app.js": { file: "web/app.js", type: "text/javascript; charset=utf-8" },
   "/style.css": { file: "web/style.css", type: "text/css; charset=utf-8" },
   "/logo.png": { file: "web/logo.png", type: "image/png" },
+  "/agent-registration.json": { file: "web/agent-registration.json", type: "application/json; charset=utf-8" },
   "/favicon.png": { file: "web/favicon.png", type: "image/png" },
   "/apple-touch-icon.png": { file: "web/apple-touch-icon.png", type: "image/png" },
 };

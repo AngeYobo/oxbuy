@@ -1,0 +1,15 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "OxBuy",
+  "description": "Autonomous x402 service buyer on Celo with deterministic pre-execution authorization enforced by OxDeAI.",
+  "services": [
+    {
+      "name": "web",
+      "endpoint": "https://oxbuy.onrender.com"
+    }
+  ],
+  "x402Support": false,
+  "active": true,
+  "supportedTrust": [],
+  "registrations": []
+}
