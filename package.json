@@ -9,10 +9,12 @@
     "node": ">=22.18"
   },
   "dependencies": {
+    "@celo/attribution-tags": "^0.5.0",
     "@noble/curves": "2.2.0",
     "@noble/hashes": "2.2.0",
     "@oxdeai/core": "2.0.2",
-    "@oxdeai/guard": "2.0.3"
+    "@oxdeai/guard": "2.0.3",
+    "viem": "^2.57.17"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

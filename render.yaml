@@ -17,6 +17,16 @@ services:
         value: "10"
       - key: OXBUY_LIVE_PER_CLIENT
         value: "2"
+      # testnet (default) or mainnet. Mainnet also needs OXDEAI_ENABLE_CELO_MAINNET and OXBUY_MAINNET_PAYER_KEY
+      # (and no OXBUY_PAYER_KEY / OXBUY_CATALOG_JSON): see docs/WEB.md.
+      - key: OXBUY_LIVE_NETWORK
+        value: testnet
+      - key: OXBUY_LIVE_COOLDOWN_SECONDS
+        value: "60"
+      - key: OXDEAI_ENABLE_CELO_MAINNET
+        sync: false
+      - key: OXBUY_MAINNET_PAYER_KEY
+        sync: false
       # Testnet payer key (hex) of a DEDICATED demo wallet funded only with what you accept to spend.
       - key: OXBUY_PAYER_KEY
         sync: false

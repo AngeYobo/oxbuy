@@ -150,3 +150,104 @@ test("W3 live endpoint (offline, simulated chain and seller): pays once with a b
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── Mainnet mode (P1): strong constraints, all fail closed ─────────────────
+
+import { CELO_MAINNET, MAINNET_APPROVAL } from "../../src/chain/networks.ts";
+
+function withApproval<T>(fn: () => T): T {
+  const prev = process.env.OXDEAI_ENABLE_CELO_MAINNET;
+  process.env.OXDEAI_ENABLE_CELO_MAINNET = MAINNET_APPROVAL;
+  try {
+    return fn();
+  } finally {
+    if (prev === undefined) delete process.env.OXDEAI_ENABLE_CELO_MAINNET;
+    else process.env.OXDEAI_ENABLE_CELO_MAINNET = prev;
+  }
+}
+
+test("W4 mainnet configuration refuses to start unless every constraint holds", () => {
+  const key = randomBytes(32).toString("hex");
+  const ok = { OXBUY_LIVE: "1", OXBUY_LIVE_NETWORK: "mainnet", OXDEAI_ENABLE_CELO_MAINNET: MAINNET_APPROVAL, OXBUY_MAINNET_PAYER_KEY: key, OXBUY_LIVE_MAX_PURCHASES: "20" };
+  // Approval only in the given environment, not in the process: refused.
+  assert.throws(() => liveConfig(ok), /WEB_MAINNET_NOT_APPROVED/);
+  withApproval(() => {
+    const c = liveConfig(ok);
+    assert.equal(c.enabled && c.mainnet, true);
+    if (!c.enabled) return;
+    assert.deepEqual([c.maxPurchases, c.perClient, c.cooldownSeconds, c.price], [20, 1, 60, 5000n]);
+    assert.equal(c.catalogFile.endsWith("config/usebuy-celo-mainnet.json"), true);
+    assert.equal(c.argv.includes("--mainnet"), true);
+    const bad: [Record<string, string | undefined>, RegExp][] = [
+      [{ OXDEAI_ENABLE_CELO_MAINNET: "yes" }, /WEB_MAINNET_NOT_APPROVED/],
+      [{ OXBUY_CATALOG_JSON: "{}" }, /WEB_MAINNET_CATALOG_PINNED/],
+      [{ OXBUY_CATALOG_FILE: "config/usebuy-celo-sepolia.json" }, /WEB_MAINNET_CATALOG_PINNED/],
+      [{ OXBUY_PAYER_KEY: key }, /WEB_MAINNET_KEY_AMBIGUOUS/],
+      [{ OXBUY_LIVE_MAX_PURCHASES: undefined }, /WEB_MAINNET_CAP_REQUIRED/],
+      [{ OXBUY_LIVE_MAX_PURCHASES: "51" }, /OXBUY_LIVE_MAX_PURCHASES/],
+      [{ OXBUY_LIVE_MAX_PURCHASES: "0" }, /OXBUY_LIVE_MAX_PURCHASES/],
+      [{ OXBUY_LIVE_PER_CLIENT: "3" }, /OXBUY_LIVE_PER_CLIENT/],
+      [{ OXBUY_LIVE_COOLDOWN_SECONDS: "10" }, /OXBUY_LIVE_COOLDOWN_SECONDS/],
+      [{ OXBUY_MAINNET_PAYER_KEY: undefined }, /OXBUY_MAINNET_PAYER_KEY/],
+      [{ OXBUY_LIVE_NETWORK: "prod" }, /OXBUY_LIVE_NETWORK/],
+    ];
+    for (const [over, re] of bad) assert.throws(() => liveConfig({ ...ok, ...over }), re, JSON.stringify(over));
+  });
+  // A mainnet key without the mainnet mode is refused (no silent testnet use of a mainnet key).
+  assert.throws(() => liveConfig({ OXBUY_LIVE: "1", OXBUY_MAINNET_PAYER_KEY: key, OXBUY_PAYER_KEY: key }), /not mainnet/);
+});
+
+test("W5 mainnet live endpoint (offline: simulated chain with the mainnet chain id and USDC): balance check, confirmation, one purchase, cooldown, RPC outage fails closed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oxbuy-web-mn-"));
+  const keyHex = randomBytes(32).toString("hex");
+  const payer = addressOfPrivateKey(parsePrivateKey(keyHex));
+  const usdc = CELO_MAINNET.assets[0]!;
+  const chain = createSimChain({ network: CELO_MAINNET, asset: usdc, now: () => Math.floor(Date.now() / 1000) });
+  const rpcUrl = await chain.listen();
+  const fac = createSimFacilitator(chain, CELO_MAINNET);
+  const payTo = "0x20faaca5f980e29639a0fcc6dca6988e18ed333b";
+  const requirements = { scheme: "exact", network: CELO_MAINNET.caip2, amount: "5000", asset: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", payTo, maxTimeoutSeconds: 60, extra: { name: "USDC", version: "2" } };
+  const posts = { data: [{ text: "Celo agents pay for APIs", author: { username: "celo" }, like_count: 4 }] };
+  const seller = await startSeller({ publicOrigin: "https://gateway.usebuy.ai", x402Version: 1, facilitator: fac.client, routes: [{ method: "POST", path: "/v1/social/x/posts/search", description: "X post search", requirements, body: () => JSON.stringify(posts) }] });
+  const base = { OXBUY_LIVE: "1", OXBUY_LIVE_NETWORK: "mainnet", OXDEAI_ENABLE_CELO_MAINNET: MAINNET_APPROVAL, OXBUY_MAINNET_PAYER_KEY: keyHex, OXBUY_LIVE_MAX_PURCHASES: "3", OXDEAI_BUYER_STATE_DIR: join(dir, "state"), OXDEAI_BUYER_EVIDENCE_DIR: join(dir, "evidence") };
+  const prev = process.env.OXDEAI_ENABLE_CELO_MAINNET;
+  process.env.OXDEAI_ENABLE_CELO_MAINNET = MAINNET_APPROVAL;
+  const apps: Awaited<ReturnType<typeof listen>>[] = [];
+  try {
+    const s = await listen(createApp({ live: liveConfig({ ...base, OXDEAI_MAINNET_RPC_URL: rpcUrl }), extra: { endpoints: { "https://gateway.usebuy.ai": seller.url } } }));
+    apps.push(s);
+    const st = (await (await fetch(`${s.base}/api/status`)).json()) as Record<string, any>;
+    assert.deepEqual([st.live.mainnet, st.live.requiresConfirmation, st.live.network], [true, true, "Celo Mainnet"]);
+    assert.match(st.live.walletUrl, /^https:\/\/celo\.blockscout\.com\/address\//);
+    assert.equal((await s.post("/api/live", { topic: "Celo agents" })).status, 400, "confirmation required");
+    // Empty wallet: refused before anything is authorized, allowance untouched.
+    const empty = await s.post("/api/live", { topic: "Celo agents", confirm: true });
+    assert.equal(empty.status, 409);
+    assert.match(empty.body.error, /no funds/);
+    chain.mint(payer, 5000n);
+    const r = await s.post("/api/live", { topic: "Celo agents", confirm: true });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.decision, "ALLOW", JSON.stringify(r.body));
+    assert.match(r.body.txUrl, /^https:\/\/celo\.blockscout\.com\/tx\/0x[0-9a-f]{64}$/);
+    assert.equal(r.body.remaining, 2);
+    assert.deepEqual(chain.transfers().map((t) => [t.to, t.value]), [[payTo, 5000n]]);
+    const again = await s.post("/api/live", { topic: "Celo again", confirm: true }, "9.9.9.9");
+    assert.equal(again.status, 429, "global cooldown");
+    assert.match(again.body.error, /One live purchase per 60 seconds/);
+    assert.equal(chain.transfers().length, 1);
+
+    // RPC outage: the balance check fails closed; nothing is bought.
+    const down = await listen(createApp({ live: liveConfig({ ...base, OXDEAI_MAINNET_RPC_URL: "http://127.0.0.1:9" }), extra: { endpoints: { "https://gateway.usebuy.ai": seller.url } } }));
+    apps.push(down);
+    const o = await down.post("/api/live", { topic: "Celo", confirm: true });
+    assert.equal(o.status, 503);
+    assert.equal(chain.transfers().length, 1);
+  } finally {
+    for (const a of apps) await a.close();
+    await seller.close();
+    await chain.close();
+    if (prev === undefined) delete process.env.OXDEAI_ENABLE_CELO_MAINNET;
+    else process.env.OXDEAI_ENABLE_CELO_MAINNET = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

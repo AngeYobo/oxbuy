@@ -17,6 +17,9 @@
     <div class="wrap top-row">
       <a class="mark" href="/"><img src="/logo.png" width="44" height="44" alt="">OxBuy</a>
       <nav class="top-links" aria-label="Project links">
+        <a href="#play-h">Playground</a>
+        <a href="#live-h">Purchases</a>
+        <a href="#real-h">Security</a>
         <a href="https://github.com/AngeYobo/oxbuy">Source on GitHub</a>
         <a href="https://github.com/oxdeai/oxdeai">OxDeAI protocol</a>
       </nav>
@@ -25,13 +28,32 @@
 
   <main>
     <section class="intro wrap">
-      <h1>An agent that pays for APIs, and cannot pay for anything it was not authorized to.</h1>
-      <p class="lede">OxBuy buys paid API calls over x402 with USDC on Celo. Before any payment is signed, OxDeAI checks that the exact purchase was authorized: the service, the recipient, the price, the request itself. If anything differs, the wallet key is never even read.</p>
+      <div class="hero-copy">
+        <span class="eyebrow"><span class="status-dot"></span> Celo · x402 · OxDeAI</span>
+        <h1>Autonomous purchases.<br><span class="accent">Deterministic control.</span></h1>
+        <p class="lede">OxBuy purchases digital services with USDC over x402 on Celo. OxDeAI checks the exact service, recipient, price and request <strong>before payment signing</strong>. An unauthorized purchase stops at the boundary.</p>
+        <div class="hero-actions"><a class="btn hero-btn" href="#play-h">Explore authorization <span aria-hidden="true">↗</span></a><a class="btn btn-quiet hero-secondary" href="#evidence-h">View on-chain evidence</a></div>
+        <p class="hero-caveat">Live payment is opt-in. Playground transactions are simulated.</p>
+      </div>
+      <div class="hero-flow" aria-label="OxBuy execution flow">
+        <div class="flow-title">THE PURCHASE BOUNDARY <span class="flow-pill">PRE-EXECUTION</span></div>
+        <div class="flow-node"><span class="flow-num">01</span><div><strong>Agent intent</strong><small>Requests a digital service</small></div><span class="flow-arrow">↓</span></div>
+        <div class="flow-node flow-guard"><span class="flow-num">02</span><div><strong>OxDeAI authorization</strong><small>Service · recipient · amount · request</small></div><span class="flow-status">ALLOW / DENY</span></div>
+        <div class="flow-node"><span class="flow-num">03</span><div><strong>x402 payment</strong><small>Only after authorization</small></div><span class="flow-arrow">↓</span></div>
+        <div class="flow-node"><span class="flow-num">04</span><div><strong>Service result</strong><small>Data returned to the agent</small></div><span class="flow-end">✓</span></div>
+      </div>
+    </section>
+
+    <section class="metrics wrap" aria-label="Project capabilities">
+      <div class="metric-card"><span class="metric-icon">◈</span><span class="metric-label">NETWORK</span><strong>Celo</strong><small>Mainnet evidence · Sepolia tests</small></div>
+      <div class="metric-card"><span class="metric-icon">◎</span><span class="metric-label">PAYMENT</span><strong>USDC / x402</strong><small>Real transaction evidence</small></div>
+      <div class="metric-card"><span class="metric-icon">⬡</span><span class="metric-label">AUTHORIZATION</span><strong>OxDeAI</strong><small>Policy → gateway → executor</small></div>
+      <div class="metric-card"><span class="metric-icon">▦</span><span class="metric-label">SECURITY DEMO</span><strong>8 scenarios</strong><small>One approved · seven blocked</small></div>
     </section>
 
     <section class="play wrap" aria-labelledby="play-h">
       <div class="play-head">
-        <h2 id="play-h">Try to make it pay for the wrong thing</h2>
+        <div><div class="section-kicker">01 / INTERACTIVE DEMO</div><h2 id="play-h">Authorization playground</h2></div>
         <button class="btn btn-quiet" id="run-all" type="button">Run all eight</button>
       </div>
       <p class="note">Each scenario runs on the server, now, with the real OxDeAI policy, gateway and executor and the real x402 signing code. The chain and the seller are simulated and a throwaway key signs, so nothing moves on a real network.</p>
@@ -68,7 +90,8 @@
     </section>
 
     <section class="live wrap" aria-labelledby="live-h">
-      <h2 id="live-h">Make one real purchase on Celo Sepolia</h2>
+      <div class="section-kicker">02 / X402 PURCHASE</div>
+      <h2 id="live-h">Make one real purchase</h2>
       <p class="note" id="live-note">Checking whether live purchases are available…</p>
       <form class="live-form" id="live-form" hidden>
         <label for="topic">Topic to research on X</label>
@@ -76,12 +99,17 @@
           <input id="topic" name="topic" type="text" minlength="2" maxlength="60" required placeholder="Celo stablecoins" autocomplete="off">
           <button class="btn" id="live-btn" type="submit">Buy the brief</button>
         </div>
+        <label class="confirm" id="confirm-row" hidden>
+          <input type="checkbox" id="confirm">
+          <span id="confirm-text"></span>
+        </label>
         <p class="hint" id="live-hint"></p>
       </form>
       <div class="live-out" id="live-out" hidden></div>
     </section>
 
     <section class="real wrap" aria-labelledby="real-h">
+      <div class="section-kicker">03 / SECURITY MODEL</div>
       <h2 id="real-h">What is real on this page</h2>
       <div class="real-grid">
         <div>
@@ -89,7 +117,7 @@
           <ul>
             <li>The OxDeAI authorization service, payment gateway, executor and journal, in both sections.</li>
             <li>The x402 client: it reads the seller's 402, compares it with the authorization and signs an EIP-3009 transfer whose nonce is derived from the authorized intent, so one authorization can settle at most once.</li>
-            <li>The live purchase: a USDC payment on Celo Sepolia to the buy gateway, visible on the block explorer.</li>
+            <li>The live purchase: a USDC payment to the buy gateway, visible on the block explorer.</li>
           </ul>
         </div>
         <div>
@@ -97,12 +125,23 @@
           <ul>
             <li>In the playground, the chain, the facilitator and the seller are local simulations.</li>
             <li>The agent is a script, not a language model. It proposes purchases; OxDeAI decides.</li>
-            <li>This page uses testnet only. Mainnet purchases need an explicit operator opt-in in the command-line tool and are never exposed here.</li>
+            <li id="net-line">Live purchases use the network shown in that section, and only after an explicit operator opt-in on the server.</li>
             <li>The live path runs the agent, the policy and the wallet key in one server process. The process-isolated deployment is in the repository and is not what this page runs.</li>
           </ul>
         </div>
       </div>
       <p class="evidence">Runs from the command line on 8 November 2026, 0.005 USDC each: Celo mainnet <a href="https://celo.blockscout.com/tx/0x6c7cb96e3dd7d92da2ed26374b4c22445b860bd20b69ad28b837be16f1fd1b59"><code>0x6c7cb96e…fd1b59</code></a>, Celo Sepolia <a href="https://celo-sepolia.blockscout.com/tx/0x29bacbec78327d7c950e79732db8751fa9822a17fca371c386ba0fadca6ef937"><code>0x29bacbec…6ef937</code></a>.</p>
+    </section>
+
+    <section class="onchain wrap" aria-labelledby="evidence-h">
+      <div class="section-kicker">04 / VERIFIED ON-CHAIN</div>
+      <h2 id="evidence-h">Public evidence, not promises.</h2>
+      <p class="note">OxBuy's identity and attribution are verifiable on Celo mainnet. The tagged transaction below proves attribution, not an x402 purchase.</p>
+      <div class="evidence-grid">
+        <a class="evidence-card" href="https://celo.blockscout.com/tx/0x4e4f0628c9bba4a57514a4dbfb892a00acb863a3d600d1552290383500d0f034" target="_blank" rel="noopener noreferrer"><span class="evidence-label">ERC-8004 IDENTITY</span><strong>Agent #10057</strong><small>Registered on Celo mainnet</small><span class="evidence-link">View registration ↗</span></a>
+        <a class="evidence-card" href="https://celoscan.io/tx/0xe0643c105e31e3da62283ff1659ad1252a75a1f85250348059b9eacee4ea6279" target="_blank" rel="noopener noreferrer"><span class="evidence-label">ERC-8021 ATTRIBUTION</span><strong>Tag verified</strong><small>celo_9d43bf3ecad7</small><span class="evidence-link">View tagged transaction ↗</span></a>
+        <a class="evidence-card" href="https://celo.blockscout.com/tx/0x6c7cb96e3dd7d92da2ed26374b4c22445b860bd20b69ad28b837be16f1fd1b59" target="_blank" rel="noopener noreferrer"><span class="evidence-label">X402 PAYMENT</span><strong>0.005 USDC</strong><small>Recorded Celo mainnet purchase</small><span class="evidence-link">View payment ↗</span></a>
+      </div>
     </section>
   </main>
 
